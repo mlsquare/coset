@@ -11,7 +11,11 @@
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.doc() = "CoSet: Hierarchical Nested Lattice Quantization for Matrix Operations";
     
-    // Core quantization operations
+    // Product quantization operations
+    m.def("product_quantize", &product_quantize_cuda, "Product quantization for arbitrary input dimensions");
+    m.def("product_dequantize", &product_dequantize_cuda, "Product dequantization from block indices");
+    
+    // Core quantization operations (legacy)
     m.def("lattice_quantize", &lattice_quantize_cuda, "Quantize tensor to lattice points");
     m.def("lattice_dequantize", &lattice_dequantize_cuda, "Dequantize lattice indices to continuous values");
     m.def("hierarchical_quantize", &hierarchical_quantize_cuda, "Hierarchical quantization");
@@ -21,7 +25,12 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("radixq_encode", &radixq_encode_cuda, "Encode using radix-q representation");
     m.def("radixq_decode", &radixq_decode_cuda, "Decode from radix-q representation");
     
-    // Matrix operations
+    // Product quantization matrix operations
+    m.def("product_quantized_matmul", &product_quantized_matmul_cuda, "Product quantized matrix multiplication");
+    m.def("product_quantized_linear", &product_quantized_linear_cuda, "Product quantized linear layer");
+    m.def("fused_product_quantized_linear_relu", &fused_product_quantized_linear_relu_cuda, "Fused product quantized linear + ReLU");
+    
+    // Matrix operations (legacy)
     m.def("lookup_dot_product", &lookup_dot_product_cuda, "Dot product using lookup tables");
     m.def("quantized_matmul", &quantized_matmul_cuda, "Quantized matrix multiplication");
     m.def("batched_quantized_matmul", &batched_quantized_matmul_cuda, "Batched quantized matrix multiplication");

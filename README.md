@@ -4,9 +4,9 @@ CoSet implements efficient matrix-matrix multiplication in quantized space using
 
 ## Key Features
 
-- **Multi-Lattice Support**: HNLQ, E8, A2, Z2, D4, and custom lattices
+- **Multi-Lattice Support**: E8 (8D), A2 (2D), Z2 (2D), D4 (4D), and custom lattices with HNLQ quantization
 - **Hierarchical Quantization**: Multi-level quantization with configurable depths
-- **Radix-Q Encoding**: Efficient encoding/decoding with different radix values
+- **Packing Encoding**: Efficient packing/compression with different radix values
 - **CUDA Optimization**: High-performance kernels for quantization and matrix operations
 - **Lookup Table Operations**: Fast dot products using precomputed lookup tables
 - **Distributed Training**: Quantized gradient communication for efficient all-reduce
@@ -26,14 +26,15 @@ CoSet implements efficient matrix-matrix multiplication in quantized space using
 
 ## Core Operations
 
-### Encoding/Decoding Operations
+### Quantization Process (Encoding/Decoding)
 
-The core encoding and decoding operations follow a hierarchical structure:
+Quantization is the process of encoding continuous values to discrete representations and decoding them back. The core operations follow a hierarchical structure:
 
-1. **Lattice Quantization**: Map continuous values to discrete lattice points
-2. **Hierarchical Encoding**: Multi-level quantization with different scales
-3. **Radix-Q Encoding**: Compress indices using radix-q representation
-4. **Lookup Table Operations**: Fast dot products in quantized space
+1. **Encoding**: Map continuous values to discrete lattice points (quantization)
+2. **Decoding**: Reconstruct continuous values from discrete lattice indices
+3. **Hierarchical Encoding**: Multi-level quantization with different scales
+4. **Packing Encoding**: Compress indices using packing representation
+5. **Lookup Table Operations**: Fast dot products in quantized space
 
 ### Matrix Operations
 
@@ -66,22 +67,22 @@ from coset import LatticeConfig, LatticeType, LatticeQuantizer
 
 # Create lattice configuration
 config = LatticeConfig(
-    type=LatticeType.HNLQ,
+    type=LatticeType.Z2,  # Use Z2 lattice (2D)
     radix=4,
     num_layers=3,
-    lattice_dim=8,
-    learnable_scales=True
+    beta=1.0,
+    alpha=1.0
 )
 
 # Create quantizer
 quantizer = LatticeQuantizer(config)
 
-# Quantize input
+# Encode (quantize) input
 input_tensor = torch.randn(32, 512)
 quantized, indices = quantizer.quantize(input_tensor)
 
-# Dequantize
-reconstructed = quantizer.dequantize(indices)
+# Decode
+reconstructed = quantizer.decode(indices)
 ```
 
 ### Quantized Linear Layer
@@ -125,15 +126,15 @@ Quantizes input tensor to lattice points.
 - `quantized`: Quantized tensor
 - `indices`: Lattice indices
 
-#### `LatticeQuantizer.dequantize(indices, depth=-1)`
-Dequantizes lattice indices back to continuous values.
+#### `LatticeQuantizer.decode(indices, depth=-1)`
+Decodes lattice indices back to continuous values.
 
 **Parameters:**
 - `indices`: Lattice indices
 - `depth`: Quantization depth
 
 **Returns:**
-- `dequantized`: Reconstructed tensor
+- `decoded`: Reconstructed tensor
 
 #### `LatticeQuantizer.encode_to_depth(input, target_depth)`
 Encodes input to specific quantization depth.
@@ -141,11 +142,11 @@ Encodes input to specific quantization depth.
 #### `LatticeQuantizer.decode_from_depth(encoded, source_depth)`
 Decodes from specific quantization depth.
 
-#### `LatticeQuantizer.radixq_encode(input, radix, depth)`
-Encodes using radix-q representation.
+#### `LatticeQuantizer.packing_encode(input, packing_radix, depth)`
+Encodes using packing representation.
 
-#### `LatticeQuantizer.radixq_decode(encoded, radix, depth)`
-Decodes from radix-q representation.
+#### `LatticeQuantizer.packing_decode(encoded, packing_radix, depth)`
+Decodes from packing representation.
 
 ## Performance
 

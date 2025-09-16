@@ -5,6 +5,63 @@
 
 // CUDA kernel implementations for matrix operations
 
+// Product quantization matrix multiplication kernels
+__global__ void product_quantized_matmul_kernel(
+    const int* weight_indices,      // [output_dim, num_blocks, lattice_dim]
+    const int* input_indices,       // [batch_size, num_blocks, lattice_dim]
+    float* output,                  // [batch_size, output_dim]
+    const float* lookup_table,
+    int batch_size,
+    int input_dim,
+    int output_dim,
+    int lattice_dim,
+    int num_blocks
+) {
+    int batch_idx = blockIdx.x;
+    int out_idx = blockIdx.y;
+    int thread_idx = threadIdx.x;
+    
+    if (batch_idx >= batch_size || out_idx >= output_dim) return;
+    
+    // Shared memory for lookup table
+    extern __shared__ float shared_lut[];
+    
+    // Load lookup table into shared memory (assuming 16x16 for 2D lattice)
+    int lut_size = 16 * 16; // Max for 2D lattice with radix 4
+    if (thread_idx < lut_size) {
+        shared_lut[thread_idx] = lookup_table[thread_idx];
+    }
+    __syncthreads();
+    
+    // Compute dot product across all blocks
+    float sum = 0.0f;
+    for (int block_idx = 0; block_idx < num_blocks; block_idx++) {
+        // Get weight and input indices for this block
+        int weight_offset = out_idx * num_blocks * lattice_dim + block_idx * lattice_dim;
+        int input_offset = batch_idx * num_blocks * lattice_dim + block_idx * lattice_dim;
+        
+        // Compute dot product for this block using lookup table
+        float block_sum = 0.0f;
+        for (int i = 0; i < lattice_dim; i++) {
+            int weight_idx = weight_indices[weight_offset + i];
+            int input_idx = input_indices[input_offset + i];
+            
+            // Clamp indices to valid lookup table range
+            weight_idx = max(0, min(weight_idx, 15));
+            input_idx = max(0, min(input_idx, 15));
+            
+            // Use lookup table
+            block_sum += shared_lut[weight_idx * 16 + input_idx];
+        }
+        sum += block_sum;
+    }
+    
+    // Store result
+    if (thread_idx == 0) {
+        output[batch_idx * output_dim + out_idx] = sum;
+    }
+}
+
 __global__ void lookup_dot_product_kernel(
     const int* x_indices,
     const int* y_indices,
@@ -336,5 +393,96 @@ extern "C" {
             weight_indices, input_indices, output, lookup_table,
             batch_size, seq_len, hidden_dim, output_dim, tile_size
         );
+    }
+    
+    // Product quantization matrix multiplication wrapper functions
+    void product_quantized_matmul_cuda(
+        const int* weight_indices,
+        const int* input_indices,
+        float* output,
+        const float* lookup_table,
+        int batch_size,
+        int input_dim,
+        int output_dim,
+        int lattice_dim,
+        int num_blocks,
+        cudaStream_t stream
+    ) {
+        dim3 grid(batch_size, output_dim);
+        dim3 block(256);
+        size_t shared_mem_size = 16 * 16 * sizeof(float); // 2D lattice lookup table
+        
+        product_quantized_matmul_kernel<<<grid, block, shared_mem_size, stream>>>(
+            weight_indices, input_indices, output, lookup_table,
+            batch_size, input_dim, output_dim, lattice_dim, num_blocks
+        );
+    }
+    
+    void product_quantized_linear_cuda(
+        const int* weight_indices,
+        const int* input_indices,
+        const float* bias,
+        float* output,
+        const float* lookup_table,
+        int batch_size,
+        int input_dim,
+        int output_dim,
+        int lattice_dim,
+        int num_blocks,
+        cudaStream_t stream
+    ) {
+        dim3 grid(batch_size, output_dim);
+        dim3 block(256);
+        size_t shared_mem_size = 16 * 16 * sizeof(float); // 2D lattice lookup table
+        
+        // For now, use the matmul kernel and add bias separately
+        // TODO: Implement fused bias kernel
+        product_quantized_matmul_kernel<<<grid, block, shared_mem_size, stream>>>(
+            weight_indices, input_indices, output, lookup_table,
+            batch_size, input_dim, output_dim, lattice_dim, num_blocks
+        );
+        
+        // Add bias
+        int block_size = 256;
+        int grid_size = (batch_size * output_dim + block_size - 1) / block_size;
+        
+        // TODO: Implement bias addition kernel
+        // add_bias_kernel<<<grid_size, block_size, 0, stream>>>(
+        //     output, bias, batch_size, output_dim
+        // );
+    }
+    
+    void fused_product_quantized_linear_relu_cuda(
+        const int* weight_indices,
+        const int* input_indices,
+        const float* bias,
+        float* output,
+        const float* lookup_table,
+        int batch_size,
+        int input_dim,
+        int output_dim,
+        int lattice_dim,
+        int num_blocks,
+        cudaStream_t stream
+    ) {
+        dim3 grid(batch_size, output_dim);
+        dim3 block(256);
+        size_t shared_mem_size = 16 * 16 * sizeof(float); // 2D lattice lookup table
+        
+        // For now, use the matmul kernel and apply ReLU separately
+        // TODO: Implement fused ReLU kernel
+        product_quantized_matmul_kernel<<<grid, block, shared_mem_size, stream>>>(
+            weight_indices, input_indices, output, lookup_table,
+            batch_size, input_dim, output_dim, lattice_dim, num_blocks
+        );
+        
+        // Apply ReLU
+        int block_size = 256;
+        int grid_size = (batch_size * output_dim + block_size - 1) / block_size;
+        
+        // TODO: Implement ReLU kernel
+        // relu_kernel<<<grid_size, block_size, 0, stream>>>(
+        //     output, batch_size * output_dim
+        // );
     }
 }

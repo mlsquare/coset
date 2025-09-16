@@ -31,40 +31,44 @@ def demo_basic_quantization():
     
     # Create lattice configuration
     config = LatticeConfig(
-        type=LatticeType.HNLQ,
+        type=LatticeType.Z2,  # Use Z2 lattice (2D)
         radix=4,
         num_layers=3,
-        lattice_dim=8,
-        learnable_scales=True
+        beta=1.0,
+        alpha=1.0
     )
     print(f"Configuration: {config}")
     
     # Create quantizer
     quantizer = LatticeQuantizer(config)
     
-    # Create test input
-    input_tensor = torch.randn(32, 8)
+    # Create test input with arbitrary dimensions (not matching lattice)
+    input_tensor = torch.randn(32, 8)  # 8D input with 2D lattice (product quantization)
     print(f"Input tensor shape: {input_tensor.shape}")
     print(f"Input range: [{input_tensor.min():.3f}, {input_tensor.max():.3f}]")
     
     # Quantize
-    quantized, indices = quantizer.quantize(input_tensor, depth=1)
+    quantized = quantizer.quantize(input_tensor)
     print(f"Quantized shape: {quantized.shape}")
+    
+    # Test quantize_to_depth
+    quantized_depth, indices = quantizer.quantize_to_depth(input_tensor, depth=1)
+    print(f"Quantized depth shape: {quantized_depth.shape}")
     print(f"Indices shape: {indices.shape}")
     print(f"Indices range: [{indices.min()}, {indices.max()}]")
     
-    # Dequantize
-    reconstructed = quantizer.dequantize(indices, depth=1)
+    # Decode
+    reconstructed = quantizer.decode_from_depth(indices, source_depth=1)
     print(f"Reconstructed shape: {reconstructed.shape}")
     
     # Calculate quantization error
     error = torch.mean(torch.abs(input_tensor - reconstructed))
     print(f"Quantization error: {error:.4f}")
     
-    # Test radix-q encoding
-    print("\n📦 Radix-Q Encoding:")
-    encoded = quantizer.radixq_encode(input_tensor, radix=4, depth=2)
-    decoded = quantizer.radixq_decode(encoded, radix=4, depth=2)
+    # Test packing encoding
+    print("\n📦 Packing Encoding:")
+    encoded = quantizer.packing_encode(input_tensor, packing_radix=4, depth=2)
+    decoded = quantizer.packing_decode(encoded, packing_radix=4, depth=2)
     print(f"Encoded shape: {encoded.shape}, dtype: {encoded.dtype}")
     print(f"Decoded shape: {decoded.shape}")
     
@@ -78,16 +82,17 @@ def demo_quantized_mlp():
     
     # Create configuration
     config = LatticeConfig(
-        type=LatticeType.HNLQ,
+        type=LatticeType.Z2,  # Use Z2 lattice (2D)
         radix=4,
         num_layers=3,
-        lattice_dim=8
+        beta=1.0,
+        alpha=1.0
     )
     
-    # Create quantized MLP
+    # Create quantized MLP with arbitrary dimensions
     model = QuantizedMLP(
-        input_dim=784,      # 28x28 images
-        hidden_dims=[512, 256, 128],
+        input_dim=512,      # 512D input (product quantization with 2D lattice)
+        hidden_dims=[256, 128],
         output_dim=10,      # 10 classes
         config=config,
         activation='ReLU',
@@ -98,11 +103,11 @@ def demo_quantized_mlp():
     
     print(f"Model created with {sum(p.numel() for p in model.parameters()):,} parameters")
     
-    # Create synthetic dataset
-    X_train = torch.randn(1000, 784)
-    y_train = torch.randint(0, 10, (1000,))
-    X_test = torch.randn(200, 784)
-    y_test = torch.randint(0, 10, (200,))
+    # Create synthetic dataset with arbitrary dimensions
+    X_train = torch.randn(1000, 512)  # 512D input with 2D lattice (product quantization)
+    y_train = torch.randint(0, 10, (1000,))  # 10 classes
+    X_test = torch.randn(200, 512)   # 512D input with 2D lattice (product quantization)
+    y_test = torch.randint(0, 10, (200,))    # 10 classes
     
     # Create data loaders
     train_loader = DataLoader(
@@ -180,10 +185,11 @@ def demo_gradient_compression():
     
     # Create configuration
     config = LatticeConfig(
-        type=LatticeType.HNLQ,
+        type=LatticeType.Z2,  # Use Z2 lattice (2D)
         radix=4,
         num_layers=3,
-        lattice_dim=8
+        beta=1.0,
+        alpha=1.0
     )
     
     # Create quantized gradient hook
@@ -194,8 +200,8 @@ def demo_gradient_compression():
         timing_enabled=True
     )
     
-    # Create mock gradients
-    gradients = torch.randn(1000, 8)
+    # Create mock gradients with arbitrary dimensions
+    gradients = torch.randn(1000, 512)  # 512D gradients (product quantization)
     print(f"Original gradients shape: {gradients.shape}")
     print(f"Original gradients size: {gradients.numel() * gradients.element_size():,} bytes")
     
@@ -234,17 +240,18 @@ def demo_performance_comparison():
     
     # Create configuration
     config = LatticeConfig(
-        type=LatticeType.HNLQ,
+        type=LatticeType.Z2,  # Use Z2 lattice (2D)
         radix=4,
         num_layers=3,
-        lattice_dim=8
+        beta=1.0,
+        alpha=1.0
     )
     
-    # Create quantized MLP
+    # Create quantized MLP with arbitrary dimensions
     quantized_mlp = QuantizedMLP(
-        input_dim=784,
-        hidden_dims=[512, 256, 128],
-        output_dim=10,
+        input_dim=784,      # 784D input (product quantization with 2D lattice)
+        hidden_dims=[512, 256],
+        output_dim=10,      # 10 classes
         config=config,
         use_lookup_tables=False
     )
@@ -255,13 +262,11 @@ def demo_performance_comparison():
         nn.ReLU(),
         nn.Linear(512, 256),
         nn.ReLU(),
-        nn.Linear(256, 128),
-        nn.ReLU(),
-        nn.Linear(128, 10)
+        nn.Linear(256, 10)
     )
     
     # Test data
-    input_tensor = torch.randn(1000, 784)
+    input_tensor = torch.randn(1000, 784)  # 784D input (product quantization)
     
     # Benchmark quantized MLP
     print("Testing Quantized MLP...")

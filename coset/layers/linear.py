@@ -80,16 +80,15 @@ class QuantizedLinear(nn.Module):
     def _init_quantization_params(self):
         """Initialize quantization parameters based on weight statistics."""
         with torch.no_grad():
-            # Initialize scales based on weight statistics
+            # Initialize beta parameter based on weight statistics
             weight_std = torch.std(self.weight)
             weight_mean = torch.mean(self.weight)
             
-            # Set initial scale to cover weight range
-            initial_scale = weight_std / (2.0 * self.config.radix)
+            # Set initial beta to cover weight range
+            initial_beta = weight_std / (2.0 * self.config.radix)
             
-            # Update quantizer scales
-            for i in range(self.config.num_layers):
-                self.quantizer.codebook.scales.data[i] = initial_scale * (2.0 ** i)
+            # Update quantizer beta parameter
+            self.quantizer.lattice.beta.data = initial_beta
     
     def _get_lookup_table(self) -> torch.Tensor:
         """Get or create lookup table for efficient computation."""
@@ -118,10 +117,10 @@ class QuantizedLinear(nn.Module):
     def _forward_with_lookup_tables(self, input: torch.Tensor, depth: int) -> torch.Tensor:
         """Forward pass using lookup tables for efficient computation."""
         # Quantize input
-        input_quantized, input_indices = self.quantizer.quantize(input, depth)
+        input_quantized, input_indices = self.quantizer.quantize_to_depth(input, depth)
         
         # Quantize weights
-        weight_quantized, weight_indices = self.quantizer.quantize(self.weight, depth)
+        weight_quantized, weight_indices = self.quantizer.quantize_to_depth(self.weight, depth)
         
         # Get lookup table
         lookup_table = self._get_lookup_table()
@@ -162,7 +161,7 @@ class QuantizedLinear(nn.Module):
         Returns:
             quantized_weights: Quantized weight tensor
         """
-        quantized, _ = self.quantizer.quantize(self.weight, depth)
+        quantized, _ = self.quantizer.quantize_to_depth(self.weight, depth)
         return quantized
     
     def get_quantized_gradients(self, depth: int = -1) -> torch.Tensor:

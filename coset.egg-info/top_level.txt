@@ -1,2 +1,0 @@
-coset
-coset_cpu

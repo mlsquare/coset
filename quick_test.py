@@ -19,42 +19,44 @@ def main():
     
     # 1. Create configuration
     config = LatticeConfig(
-        type=LatticeType.HNLQ,
+        type=LatticeType.Z2,  # Use Z2 lattice (2D)
         radix=4,
         num_layers=3,
-        lattice_dim=8
+        beta=1.0,
+        alpha=1.0
     )
     print(f"✅ Configuration: {config}")
     
-    # 2. Test basic quantization
+    # 2. Test basic quantization with product quantization
     quantizer = LatticeQuantizer(config)
-    input_tensor = torch.randn(10, 8)
+    input_tensor = torch.randn(10, 8)  # 8D input with 2D lattice (product quantization)
     
-    quantized, indices = quantizer.quantize(input_tensor, depth=1)
-    reconstructed = quantizer.dequantize(indices, depth=1)
+    quantized = quantizer.quantize(input_tensor)
+    quantized_depth, indices = quantizer.quantize_to_depth(input_tensor, depth=1)
+    reconstructed = quantizer.decode_from_depth(indices, source_depth=1)
     
     print(f"✅ Quantization: {input_tensor.shape} → {quantized.shape}")
     print(f"✅ Dequantization: {indices.shape} → {reconstructed.shape}")
     
-    # 3. Test quantized MLP
+    # 3. Test quantized MLP with product quantization
     mlp = QuantizedMLP(
-        input_dim=100,
-        hidden_dims=[64, 32],
+        input_dim=784,  # 784D input (product quantization with 2D lattice)
+        hidden_dims=[256, 128],
         output_dim=10,
         config=config
     )
     
-    test_input = torch.randn(5, 100)
+    test_input = torch.randn(5, 784)  # 784D input (product quantization)
     output = mlp(test_input)
     
     print(f"✅ MLP: {test_input.shape} → {output.shape}")
     print(f"✅ Model has {sum(p.numel() for p in mlp.parameters()):,} parameters")
     
-    # 4. Test radix-q encoding
-    encoded = quantizer.radixq_encode(input_tensor, radix=4, depth=2)
-    decoded = quantizer.radixq_decode(encoded, radix=4, depth=2)
+    # 4. Test packing encoding
+    encoded = quantizer.packing_encode(input_tensor, packing_radix=4, depth=2)
+    decoded = quantizer.packing_decode(encoded, packing_radix=4, depth=2)
     
-    print(f"✅ Radix-Q: {input_tensor.shape} → {encoded.shape} → {decoded.shape}")
+    print(f"✅ Packing: {input_tensor.shape} → {encoded.shape} → {decoded.shape}")
     
     print("\n🎉 All tests passed! CoSet is working correctly.")
     print("\n💡 Try running 'python simple_example.py' for a comprehensive demo.")

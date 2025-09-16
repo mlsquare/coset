@@ -88,10 +88,10 @@ class QuantizedLinearFunction(Function):
             output: Output tensor [batch_size, out_features]
         """
         # Quantize input
-        input_quantized, input_indices = quantizer.quantize(input, depth)
+        input_quantized, input_indices = quantizer.quantize_to_depth(input, depth)
         
         # Quantize weights
-        weight_quantized, weight_indices = quantizer.quantize(weight, depth)
+        weight_quantized, weight_indices = quantizer.quantize_to_depth(weight, depth)
         
         # Perform quantized matrix multiplication
         # For now, we'll use standard matrix multiplication

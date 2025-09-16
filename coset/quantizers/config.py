@@ -9,63 +9,85 @@ import torch
 
 class LatticeType(Enum):
     """Supported lattice types for quantization."""
-    HNLQ = "hnlq"           # Hierarchical Nested Lattice Quantization
     E8 = "e8"               # E8 lattice (8D)
     A2 = "a2"               # A2 lattice (2D hexagonal)
     Z2 = "z2"               # Z2 lattice (2D square)
     D4 = "d4"               # D4 lattice (4D)
     CUSTOM = "custom"       # User-defined lattice
+    
+    def get_dimension(self) -> int:
+        """Get the dimension of the lattice type."""
+        dimension_map = {
+            LatticeType.E8: 8,
+            LatticeType.A2: 2,
+            LatticeType.Z2: 2,
+            LatticeType.D4: 4,
+            LatticeType.CUSTOM: None  # User must specify
+        }
+        return dimension_map[self]
 
 
 class LatticeConfig:
     """
-    Configuration for lattice quantization.
+    Configuration for lattice quantization using HNLQ method.
     
-    This class defines the parameters for hierarchical nested lattice quantization,
-    including lattice type, dimensions, radix values, and quantization depths.
+    This class defines the parameters for hierarchical nested lattice quantization (HNLQ),
+    which is the process of encoding continuous values to discrete lattice points and
+    decoding them back. HNLQ can be applied to different lattice types (E8, A2, Z2, D4, etc.)
+    with configurable dimensions, radix values, and encoding/decoding depths.
     """
     
     def __init__(
         self,
-        type: LatticeType = LatticeType.HNLQ,
+        type: LatticeType = LatticeType.Z2,
         radix: int = 4,
         num_layers: int = 3,
-        lattice_dim: int = 8,
-        scales: Optional[List[float]] = None,
-        zero_points: Optional[List[int]] = None,
-        learnable_scales: bool = True,
-        learnable_zero_points: bool = False,
+        lattice_dim: Optional[int] = None,
+        beta: float = 1.0,
+        alpha: float = 1.0,
+        eps: float = 1e-8,
+        overload: bool = True,
+        max_scaling_iterations: int = 10,
+        with_tie_dither: bool = True,
+        with_dither: bool = False,
     ):
         """
         Initialize lattice configuration.
         
         Args:
-            type: Type of lattice to use
-            radix: Base for radix-q encoding
-            num_layers: Number of hierarchy levels
-            lattice_dim: Dimension of the lattice
-            scales: Scale factors for each layer (if None, auto-generated)
-            zero_points: Zero points for each layer (if None, auto-generated)
-            learnable_scales: Whether scales are learnable parameters
-            learnable_zero_points: Whether zero points are learnable parameters
+            type: Type of lattice to use (E8=8D, A2=2D, Z2=2D, D4=4D, CUSTOM)
+            radix: Base for HNLQ quantization (quantization parameter q)
+            num_layers: Number of hierarchy levels for HNLQ encoding/decoding
+            lattice_dim: Dimension of the lattice (auto-set based on type, required for CUSTOM)
+            beta: Scaling parameter for quantization
+            alpha: Scaling parameter for overload handling
+            eps: Small perturbation parameter
+            overload: Whether to handle overload by scaling
+            max_scaling_iterations: Maximum number of scaling iterations
+            with_tie_dither: Whether to add tie dither
+            with_dither: Whether to add dither for randomized quantization
         """
         self.type = type
         self.radix = radix
         self.num_layers = num_layers
-        self.lattice_dim = lattice_dim
-        self.learnable_scales = learnable_scales
-        self.learnable_zero_points = learnable_zero_points
         
-        # Initialize scales and zero points
-        if scales is None:
-            self.scales = [2.0 ** i for i in range(num_layers)]
+        # Set lattice dimension based on lattice type
+        if lattice_dim is None:
+            if type == LatticeType.CUSTOM:
+                raise ValueError("lattice_dim must be specified for CUSTOM lattice type")
+            self.lattice_dim = type.get_dimension()
         else:
-            self.scales = scales
+            if type != LatticeType.CUSTOM and lattice_dim != type.get_dimension():
+                raise ValueError(f"lattice_dim {lattice_dim} does not match {type.name} lattice dimension {type.get_dimension()}")
+            self.lattice_dim = lattice_dim
             
-        if zero_points is None:
-            self.zero_points = [0] * num_layers
-        else:
-            self.zero_points = zero_points
+        self.beta = beta
+        self.alpha = alpha
+        self.eps = eps
+        self.overload = overload
+        self.max_scaling_iterations = max_scaling_iterations
+        self.with_tie_dither = with_tie_dither
+        self.with_dither = with_dither
             
         # Validate configuration
         self._validate_config()
@@ -81,11 +103,14 @@ class LatticeConfig:
         if self.lattice_dim < 1:
             raise ValueError(f"Lattice dimension must be >= 1, got {self.lattice_dim}")
         
-        if len(self.scales) != self.num_layers:
-            raise ValueError(f"Number of scales ({len(self.scales)}) must match number of layers ({self.num_layers})")
+        if self.beta <= 0:
+            raise ValueError(f"Beta must be > 0, got {self.beta}")
         
-        if len(self.zero_points) != self.num_layers:
-            raise ValueError(f"Number of zero points ({len(self.zero_points)}) must match number of layers ({self.num_layers})")
+        if self.alpha <= 0:
+            raise ValueError(f"Alpha must be > 0, got {self.alpha}")
+        
+        if self.max_scaling_iterations <= 0:
+            raise ValueError(f"Max scaling iterations must be > 0, got {self.max_scaling_iterations}")
     
     def get_num_codewords(self) -> int:
         """Get number of codewords in the lattice."""
@@ -102,10 +127,13 @@ class LatticeConfig:
             'radix': self.radix,
             'num_layers': self.num_layers,
             'lattice_dim': self.lattice_dim,
-            'scales': self.scales,
-            'zero_points': self.zero_points,
-            'learnable_scales': self.learnable_scales,
-            'learnable_zero_points': self.learnable_zero_points,
+            'beta': self.beta,
+            'alpha': self.alpha,
+            'eps': self.eps,
+            'overload': self.overload,
+            'max_scaling_iterations': self.max_scaling_iterations,
+            'with_tie_dither': self.with_tie_dither,
+            'with_dither': self.with_dither,
         }
     
     @classmethod

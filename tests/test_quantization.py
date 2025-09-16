@@ -134,9 +134,9 @@ class TestLatticeQuantizer:
         """Test dequantization."""
         input_tensor = torch.randn(32, 8)
         
-        # Quantize and dequantize
-        quantized, indices = quantizer.quantize(input_tensor, depth=1)
-        reconstructed = quantizer.dequantize(indices, depth=1)
+        # Quantize and decode
+        quantized, indices = quantizer.quantize_to_depth(input_tensor, depth=1)
+        reconstructed = quantizer.decode_from_depth(indices, source_depth=1)
         
         assert reconstructed.shape == input_tensor.shape
         assert reconstructed.dtype == torch.float32
@@ -150,20 +150,20 @@ class TestLatticeQuantizer:
         input_tensor = torch.randn(32, 8)
         
         # Test hierarchical quantization
-        quantized, indices = quantizer.quantize(input_tensor, depth=-1)
-        reconstructed = quantizer.dequantize(indices, depth=-1)
+        quantized = quantizer.quantize(input_tensor)
+        quantized_depth, indices = quantizer.quantize_to_depth(input_tensor, depth=1)
         
         assert quantized.shape == input_tensor.shape
-        assert indices.shape == (32, 3)  # num_layers
-        assert reconstructed.shape == input_tensor.shape
+        assert indices.shape == (32,)  # Single depth
+        assert quantized_depth.shape == input_tensor.shape
     
-    def test_radixq_encoding(self, quantizer):
-        """Test radix-q encoding/decoding."""
+    def test_packing_encoding(self, quantizer):
+        """Test packing encoding/decoding."""
         input_tensor = torch.randn(32, 8)
         
-        # Test radix-q encoding
-        encoded = quantizer.radixq_encode(input_tensor, radix=4, depth=2)
-        decoded = quantizer.radixq_decode(encoded, radix=4, depth=2)
+        # Test packing encoding
+        encoded = quantizer.packing_encode(input_tensor, packing_radix=4, depth=2)
+        decoded = quantizer.packing_decode(encoded, packing_radix=4, depth=2)
         
         assert encoded.shape == input_tensor.shape
         assert encoded.dtype == torch.int32
@@ -496,10 +496,11 @@ class TestIntegration:
         input_tensor = torch.randn(32, 8)
         
         # Quantize
-        quantized, indices = quantizer.quantize(input_tensor)
+        quantized = quantizer.quantize(input_tensor)
         
-        # Dequantize
-        reconstructed = quantizer.dequantize(indices)
+        # Test decode from depth
+        quantized_depth, indices = quantizer.quantize_to_depth(input_tensor, depth=1)
+        reconstructed = quantizer.decode_from_depth(indices, source_depth=1)
         
         # Check reconstruction quality
         error = torch.mean(torch.abs(input_tensor - reconstructed))

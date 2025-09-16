@@ -34,20 +34,20 @@ def train_quantized_mlp():
     
     # Create lattice configuration
     config = LatticeConfig(
-        type=LatticeType.HNLQ,
+        type=LatticeType.Z2,  # Use Z2 lattice (2D)
         radix=4,
         num_layers=3,
-        lattice_dim=8,
-        learnable_scales=True
+        beta=1.0,
+        alpha=1.0
     )
     
     print(f"Lattice configuration: {config}")
     
-    # Create quantized MLP
+    # Create quantized MLP with arbitrary dimensions
     model = QuantizedMLP(
-        input_dim=784,
+        input_dim=784,      # 784D input (product quantization with 2D lattice)
         hidden_dims=[512, 256, 128],
-        output_dim=10,
+        output_dim=10,      # 10 classes
         config=config,
         activation="ReLU",
         dropout=0.2,
@@ -57,7 +57,7 @@ def train_quantized_mlp():
     
     print(f"Model: {model}")
     
-    # Create synthetic dataset
+    # Create synthetic dataset with arbitrary dimensions
     X_train, y_train = create_synthetic_data(1000, 784, 10)
     X_test, y_test = create_synthetic_data(200, 784, 10)
     
@@ -161,43 +161,45 @@ def demonstrate_encoding_decoding():
     
     # Create lattice configuration
     config = LatticeConfig(
-        type=LatticeType.HNLQ,
+        type=LatticeType.Z2,  # Use Z2 lattice (2D)
         radix=4,
-        num_layers=3,
-        lattice_dim=8
+        num_layers=3
     )
     
     # Create quantizer
     from coset.quantizers import LatticeQuantizer
     quantizer = LatticeQuantizer(config)
     
-    # Create test input
-    input_tensor = torch.randn(32, 8)
+    # Create test input with arbitrary dimensions
+    input_tensor = torch.randn(32, 8)  # 8D input with 2D lattice (product quantization)
     print(f"Input tensor shape: {input_tensor.shape}")
     print(f"Input tensor range: [{input_tensor.min():.3f}, {input_tensor.max():.3f}]")
     
     # Quantize input
-    quantized, indices = quantizer.quantize(input_tensor)
+    quantized = quantizer.quantize(input_tensor)
     print(f"Quantized tensor shape: {quantized.shape}")
+    
+    # Test quantize_to_depth for indices
+    quantized_depth, indices = quantizer.quantize_to_depth(input_tensor, depth=1)
     print(f"Indices shape: {indices.shape}")
     print(f"Indices range: [{indices.min()}, {indices.max()}]")
     
-    # Dequantize
-    reconstructed = quantizer.dequantize(indices)
+    # Decode from indices
+    reconstructed = quantizer.decode_from_depth(indices, source_depth=1)
     print(f"Reconstructed tensor shape: {reconstructed.shape}")
     
     # Compute quantization error
     quantization_error = torch.mean(torch.abs(input_tensor - reconstructed))
     print(f"Quantization error: {quantization_error:.4f}")
     
-    # Demonstrate radix-q encoding
-    print("\n--- Radix-Q Encoding ---")
-    encoded = quantizer.radixq_encode(input_tensor, radix=4, depth=2)
+    # Demonstrate packing encoding
+    print("\n--- Packing Encoding ---")
+    encoded = quantizer.packing_encode(input_tensor, packing_radix=4, depth=2)
     print(f"Encoded tensor shape: {encoded.shape}")
     print(f"Encoded tensor dtype: {encoded.dtype}")
     
-    # Decode from radix-q
-    decoded = quantizer.radixq_decode(encoded, radix=4, depth=2)
+    # Decode from packing
+    decoded = quantizer.packing_decode(encoded, packing_radix=4, depth=2)
     print(f"Decoded tensor shape: {decoded.shape}")
     
     # Demonstrate lookup table operations
@@ -217,10 +219,9 @@ def demonstrate_distributed_training():
     
     # Create lattice configuration
     config = LatticeConfig(
-        type=LatticeType.HNLQ,
+        type=LatticeType.Z2,  # Use Z2 lattice (2D)
         radix=4,
-        num_layers=3,
-        lattice_dim=8
+        num_layers=3
     )
     
     # Create quantized gradient hook
@@ -234,8 +235,8 @@ def demonstrate_distributed_training():
     # Simulate gradient communication
     print("Simulating gradient communication...")
     
-    # Create mock gradients
-    gradients = torch.randn(1000, 8)
+    # Create mock gradients with arbitrary dimensions
+    gradients = torch.randn(1000, 512)  # 512D gradients (product quantization)
     print(f"Original gradients shape: {gradients.shape}")
     print(f"Original gradients size: {gradients.numel() * gradients.element_size()} bytes")
     

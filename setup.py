@@ -16,6 +16,7 @@ if cuda_available:
             name='coset_cuda',
             sources=[
                 'src/cuda/kernels/quantization.cu',
+                'src/cuda/kernels/product_quantization.cu',
                 'src/cuda/kernels/matmul.cu',
                 'src/cuda/kernels/gradients.cu',
                 'src/cuda/utils/memory.cu',
