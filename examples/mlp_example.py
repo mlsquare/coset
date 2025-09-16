@@ -43,34 +43,34 @@ def train_quantized_mlp():
     
     print(f"Lattice configuration: {config}")
     
-    # Create quantized MLP with arbitrary dimensions
+    # Create small quantized MLP for quick testing
     model = QuantizedMLP(
-        input_dim=784,      # 784D input (product quantization with 2D lattice)
-        hidden_dims=[512, 256, 128],
-        output_dim=10,      # 10 classes
+        input_dim=32,       # Small 32D input
+        hidden_dims=[16, 8], # Just 2 hidden layers
+        output_dim=4,       # 4 classes
         config=config,
         activation="ReLU",
-        dropout=0.2,
+        dropout=0.1,
         use_ste=True,
         use_lookup_tables=True
     ).to(device)
     
     print(f"Model: {model}")
     
-    # Create synthetic dataset with arbitrary dimensions
-    X_train, y_train = create_synthetic_data(1000, 784, 10)
-    X_test, y_test = create_synthetic_data(200, 784, 10)
+    # Create synthetic dataset with small dimensions
+    X_train, y_train = create_synthetic_data(200, 32, 4)  # Small dataset
+    X_test, y_test = create_synthetic_data(50, 32, 4)     # Small test set
     
     # Create data loaders
     train_loader = DataLoader(
         TensorDataset(X_train, y_train),
-        batch_size=32,
+        batch_size=16,  # Smaller batch size
         shuffle=True
     )
     
     test_loader = DataLoader(
         TensorDataset(X_test, y_test),
-        batch_size=32,
+        batch_size=16,  # Smaller batch size
         shuffle=False
     )
     
@@ -90,7 +90,7 @@ def train_quantized_mlp():
     criterion = nn.CrossEntropyLoss()
     
     # Training loop
-    num_epochs = 5
+    num_epochs = 2  # Just 2 epochs for quick testing
     model.train()
     
     for epoch in range(num_epochs):
