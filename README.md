@@ -155,6 +155,22 @@ Decodes from packing representation.
 - **Gradient Communication**: 3-5x reduction in communication overhead
 - **Memory Usage**: 2-3x reduction in memory footprint
 
+## Matrix Multiplication Analysis
+
+Comprehensive matrix multiplication comparison tests and analysis are available in the `matmul_comparisons/` directory:
+
+- **E8 Lattice Performance**: Detailed analysis across different matrix norms and sizes
+- **Scatter Plot Visualizations**: High-resolution plots showing quantization accuracy
+- **Norm Scaling Analysis**: Performance from norm=1 to norm=256 (including 4³=64)
+- **Large Matrix Tests**: Up to 24,576 element matrices (128×256→128×192)
+
+Key findings:
+- **Norm=1**: Exceptional accuracy (0.028 relative error, 0.9996 correlation)
+- **Norm=64 (4³)**: LUT-based outperforms standard quantized (0.998 vs 7.574 relative error)
+- **E8 Lattice**: Handles large norms robustly without numerical issues
+
+See `matmul_comparisons/README.md` for detailed usage instructions and results.
+
 ## License
 
 MIT License - see LICENSE file for details.
