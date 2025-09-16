@@ -90,41 +90,100 @@ def g_x(x):
     """Helper function for D_n lattice closest point algorithm."""
     f_x = custom_round(x)
     delta = torch.abs(x - f_x)
-    k = torch.argmax(delta)
-    g_x_ = f_x.clone()
     
-    x_k = x[k]
-    f_x_k = f_x[k]
-    
-    if x_k >= 0:
-        g_x_[k] = f_x_k + 1 if f_x_k < x_k else f_x_k - 1
+    # Handle both 1D and 2D inputs
+    if x.dim() == 1:
+        # Original 1D case
+        k = torch.argmax(delta)
+        g_x_ = f_x.clone()
+        
+        x_k = x[k]
+        f_x_k = f_x[k]
+        
+        if x_k >= 0:
+            g_x_[k] = f_x_k + 1 if f_x_k < x_k else f_x_k - 1
+        else:
+            g_x_[k] = f_x_k + 1 if f_x_k <= x_k else f_x_k - 1
+        
+        return g_x_
     else:
-        g_x_[k] = f_x_k + 1 if f_x_k <= x_k else f_x_k - 1
-    
-    return g_x_
+        # Handle 2D batched case
+        batch_size = x.shape[0]
+        g_x_ = f_x.clone()
+        
+        for i in range(batch_size):
+            k = torch.argmax(delta[i])
+            x_k = x[i, k]
+            f_x_k = f_x[i, k]
+            
+            if x_k >= 0:
+                g_x_[i, k] = f_x_k + 1 if f_x_k < x_k else f_x_k - 1
+            else:
+                g_x_[i, k] = f_x_k + 1 if f_x_k <= x_k else f_x_k - 1
+        
+        return g_x_
 
 
 def closest_point_Dn(x):
     """Find the closest point in the D_n lattice."""
     f_x = custom_round(x)
     g_x_res = g_x(x)
-    return f_x if torch.sum(f_x) % 2 == 0 else g_x_res
+    
+    # Handle both 1D and 2D inputs
+    if x.dim() == 1:
+        return f_x if torch.sum(f_x) % 2 == 0 else g_x_res
+    else:
+        # For batched inputs, check each sample individually
+        result = f_x.clone()
+        for i in range(x.shape[0]):
+            if torch.sum(f_x[i]) % 2 == 0:
+                result[i] = f_x[i]
+            else:
+                result[i] = g_x_res[i]
+        return result
 
 
 def closest_point_E8(x):
     """Find the closest point in the E_8 lattice."""
     f_x = custom_round(x)
-    y_0 = f_x if torch.sum(f_x) % 2 == 0 else g_x(x)
     
-    f_x_shifted = custom_round(x - 0.5)
-    g_x_shifted = g_x(x - 0.5)
-    
-    y_1 = f_x_shifted + 0.5 if torch.sum(f_x_shifted) % 2 == 0 else g_x_shifted + 0.5
-    
-    if torch.norm(x - y_0) < torch.norm(x - y_1):
-        return y_0
+    # Handle both 1D and 2D inputs
+    if x.dim() == 1:
+        # Original 1D case
+        y_0 = f_x if torch.sum(f_x) % 2 == 0 else g_x(x)
+        
+        f_x_shifted = custom_round(x - 0.5)
+        g_x_shifted = g_x(x - 0.5)
+        
+        y_1 = f_x_shifted + 0.5 if torch.sum(f_x_shifted) % 2 == 0 else g_x_shifted + 0.5
+        
+        if torch.norm(x - y_0) < torch.norm(x - y_1):
+            return y_0
+        else:
+            return y_1
     else:
-        return y_1
+        # Handle 2D batched case
+        batch_size = x.shape[0]
+        result = f_x.clone()
+        
+        for i in range(batch_size):
+            # Process each sample individually
+            x_i = x[i]
+            f_x_i = f_x[i]
+            
+            y_0_i = f_x_i if torch.sum(f_x_i) % 2 == 0 else g_x(x_i.unsqueeze(0)).squeeze(0)
+            
+            f_x_shifted_i = custom_round(x_i - 0.5)
+            g_x_shifted_i = g_x((x_i - 0.5).unsqueeze(0)).squeeze(0)
+            
+            y_1_i = f_x_shifted_i + 0.5 if torch.sum(f_x_shifted_i) % 2 == 0 else g_x_shifted_i + 0.5
+            
+            if torch.norm(x_i - y_0_i) < torch.norm(x_i - y_1_i):
+                result[i] = y_0_i
+            else:
+                result[i] = y_1_i
+        
+        return result
 
 
 def closest_point_A2(u):
@@ -452,6 +511,9 @@ class LatticeQuantizer(nn.Module):
         # If input dimension matches lattice dimension, process directly
         if input_dim == lattice_dim:
             quantized, indices = self._quantize_block_to_depth(x, depth)
+            # Ensure indices have the correct block structure [batch_size, 1, lattice_dim]
+            if indices.dim() == 2:  # [batch_size, lattice_dim]
+                indices = indices.unsqueeze(-2)  # [batch_size, 1, lattice_dim]
             return quantized, indices
         
         # Reshape to (batch_dims..., num_blocks, lattice_dim)
