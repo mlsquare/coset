@@ -29,6 +29,7 @@ from typing import Tuple, Optional, Union
 import math
 
 from .config import LatticeConfig
+from .hnlq import LatticeQuantizer
 
 
 class RadixQEncoder(nn.Module):
@@ -248,6 +249,9 @@ class QuantizedGradientCompressor(nn.Module):
         self.config = config
         self.radix_encoder = RadixQEncoder(config)
         
+        # Initialize HNLQ quantizer for gradient quantization
+        self.quantizer = LatticeQuantizer(config)
+        
         # Communication parameters
         self.communication_depth = 1  # Default depth for communication
         self.compression_enabled = True
@@ -260,12 +264,16 @@ class QuantizedGradientCompressor(nn.Module):
         """
         Compress gradients for communication.
         
+        This method first quantizes gradients using HNLQ to get indices,
+        then encodes those indices using radix-q encoding for efficient
+        communication.
+        
         Args:
             gradients: Gradient tensor
             depth: Compression depth (uses default if None)
             
         Returns:
-            compressed: Compressed gradient tensor
+            compressed: Compressed gradient tensor (radix-q encoded indices)
         """
         if depth is None:
             depth = self.communication_depth
@@ -273,8 +281,13 @@ class QuantizedGradientCompressor(nn.Module):
         if not self.compression_enabled:
             return gradients
         
-        # Encode gradients using radix-q
-        return self.radix_encoder.encode_gradients(gradients, depth)
+        # Step 1: Quantize gradients using HNLQ to get indices
+        quantized_gradients, indices = self.quantizer.quantize_to_depth(gradients, depth)
+        
+        # Step 2: Encode the quantized indices using radix-q
+        compressed_indices = self.radix_encoder.encode(indices, depth)
+        
+        return compressed_indices
     
     def decompress_gradients(
         self, 
@@ -284,8 +297,11 @@ class QuantizedGradientCompressor(nn.Module):
         """
         Decompress gradients after communication.
         
+        This method first decodes the radix-q encoded indices,
+        then dequantizes them using HNLQ to reconstruct the gradients.
+        
         Args:
-            compressed_gradients: Compressed gradient tensor
+            compressed_gradients: Compressed gradient tensor (radix-q encoded indices)
             depth: Compression depth (uses default if None)
             
         Returns:
@@ -297,8 +313,13 @@ class QuantizedGradientCompressor(nn.Module):
         if not self.compression_enabled:
             return compressed_gradients
         
-        # Decode gradients from radix-q
-        return self.radix_encoder.decode_gradients(compressed_gradients, depth)
+        # Step 1: Decode the radix-q encoded indices
+        indices = self.radix_encoder.decode(compressed_gradients, depth)
+        
+        # Step 2: Dequantize the indices to reconstruct gradients
+        reconstructed_gradients = self.quantizer.decode_from_depth(indices, depth)
+        
+        return reconstructed_gradients
     
     def set_communication_depth(self, depth: int):
         """Set communication depth for gradient compression."""
