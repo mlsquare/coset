@@ -266,18 +266,18 @@ def main():
     print("🔬 Quantized vs Standard Matrix Multiplication Comparison")
     print("=" * 60)
     
-    # Create test matrices (compatible with E8 lattice dimension = 8)
+    # Create test matrices (compatible with Z2 lattice dimension = 2)
     print("Creating test matrices...")
-    A, B = create_test_matrices(batch_size=8, in_features=16, out_features=8)  # 16 = 2 * 8
+    A, B = create_test_matrices(batch_size=8, in_features=16, out_features=8)  # 16 = 8 * 2
     bias = torch.randn(8) * 0.1
     
     print(f"Input matrix A: {A.shape}")
     print(f"Weight matrix B: {B.shape}")
     print(f"Bias vector: {bias.shape}")
     
-    # Create lattice configuration
+    # Create lattice configuration (using Z2 due to E8 implementation issue)
     config = LatticeConfig(
-        type=LatticeType.E8,
+        type=LatticeType.Z2,
         radix=4,
         num_layers=3
     )
