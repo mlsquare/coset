@@ -11,6 +11,7 @@ from torch.autograd import Function
 from typing import Tuple, Optional
 
 from ..quantizers.config import LatticeConfig
+from ..quantizers.hnlq import LatticeQuantizer
 
 
 class STEFunction(Function):
@@ -340,3 +341,143 @@ def quantize_gradients(
         quantized_gradients: Quantized gradient tensor
     """
     return QuantizedGradientFunction.apply(gradients, compressor, depth)
+
+
+def quantized_matmul(
+    input_indices: torch.Tensor,
+    weight_indices: torch.Tensor,
+    lookup_table: torch.Tensor,
+    bias: Optional[torch.Tensor] = None
+) -> torch.Tensor:
+    """
+    Clean quantized matrix multiplication using lookup tables.
+    
+    This function performs efficient matrix multiplication in quantized space
+    using precomputed lookup tables, handling all block-wise operations internally.
+    
+    Args:
+        input_indices: Input indices [batch_size, num_blocks, lattice_dim]
+        weight_indices: Weight indices [out_features, num_blocks, lattice_dim]
+        lookup_table: Precomputed lookup table for dot products
+        bias: Optional bias tensor [out_features]
+        
+    Returns:
+        output: Output tensor [batch_size, out_features]
+    """
+    batch_size, num_blocks, lattice_dim = input_indices.shape
+    out_features = weight_indices.shape[0]
+    
+    # Initialize output tensor
+    output = torch.zeros(batch_size, out_features, device=input_indices.device, dtype=torch.float32)
+    
+    # Perform quantized matrix multiplication using lookup tables
+    for out_idx in range(out_features):
+        for batch_idx in range(batch_size):
+            # Get indices for this combination
+            input_idx = input_indices[batch_idx]  # [num_blocks, lattice_dim]
+            weight_idx = weight_indices[out_idx]  # [num_blocks, lattice_dim]
+            
+            # Compute dot product for each block using lookup table
+            block_dot_products = []
+            for block_idx in range(num_blocks):
+                # Get single block indices
+                input_block = input_idx[block_idx]  # [lattice_dim]
+                weight_block = weight_idx[block_idx]  # [lattice_dim]
+                
+                # Compute dot product using lookup table
+                # Clamp indices to valid range for lookup table
+                max_idx = lookup_table.shape[0] - 1
+                input_clamped = torch.clamp(input_block, 0, max_idx)
+                weight_clamped = torch.clamp(weight_block, 0, max_idx)
+                
+                # Get lookup table values and sum to get dot product
+                dot_product_elements = lookup_table[input_clamped, weight_clamped]
+                block_dot_product = dot_product_elements.sum().item()
+                block_dot_products.append(block_dot_product)
+            
+            # Sum over blocks
+            output[batch_idx, out_idx] = sum(block_dot_products)
+    
+    # Add bias if present
+    if bias is not None:
+        output = output + bias
+    
+    return output
+
+
+def fused_quantized_linear(
+    input: torch.Tensor,
+    weight: torch.Tensor,
+    bias: Optional[torch.Tensor],
+    quantizer,
+    depth: int,
+    use_ste: bool = True
+) -> torch.Tensor:
+    """
+    Fused quantized linear transformation: Quantize + MatMul + Add Bias.
+    
+    This function provides a clean interface similar to standard PyTorch linear layers
+    but operates in quantized space using lookup tables.
+    
+    Args:
+        input: Input tensor [batch_size, in_features]
+        weight: Weight tensor [out_features, in_features]
+        bias: Optional bias tensor [out_features]
+        quantizer: Lattice quantizer instance
+        depth: Quantization depth
+        use_ste: Whether to use straight-through estimator
+        
+    Returns:
+        output: Output tensor [batch_size, out_features]
+    """
+    # Quantize input to get indices
+    input_quantized, input_indices = quantizer.quantize_to_depth(input, depth)
+    
+    # Quantize weights to get indices
+    weight_quantized, weight_indices = quantizer.quantize_to_depth(weight, depth)
+    
+    # Get lookup table
+    if quantizer._dot_product_lut is None:
+        quantizer._dot_product_lut = quantizer.create_lookup_table()
+        if not hasattr(quantizer, '_dot_product_lut'):
+            quantizer.register_buffer('_dot_product_lut', quantizer._dot_product_lut)
+    
+    # Perform quantized matrix multiplication
+    output = quantized_matmul(input_indices, weight_indices, quantizer._dot_product_lut, bias)
+    
+    # Apply STE if enabled
+    if use_ste:
+        # Compute standard matrix multiplication for STE
+        standard_output = torch.matmul(input, weight.t())
+        if bias is not None:
+            standard_output = standard_output + bias
+        output = ste_quantize(standard_output, output)
+    
+    return output
+
+
+def standard_quantized_linear(
+    input: torch.Tensor,
+    weight: torch.Tensor,
+    bias: Optional[torch.Tensor],
+    quantizer,
+    depth: int
+) -> torch.Tensor:
+    """
+    Standard quantized linear transformation without lookup tables.
+    
+    This function provides a fallback implementation that uses standard
+    quantized operations without lookup table optimization.
+    
+    Args:
+        input: Input tensor [batch_size, in_features]
+        weight: Weight tensor [out_features, in_features]
+        bias: Optional bias tensor [out_features]
+        quantizer: Lattice quantizer instance
+        depth: Quantization depth
+        
+    Returns:
+        output: Output tensor [batch_size, out_features]
+    """
+    # Use the existing quantized_linear function
+    return quantized_linear(input, weight, bias, quantizer, depth)

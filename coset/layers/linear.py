@@ -13,7 +13,7 @@ from typing import Optional, Dict, Any
 from ..quantizers.config import LatticeConfig
 from ..quantizers.hnlq import LatticeQuantizer
 from ..quantizers.radixq import QuantizedGradientCompressor
-from .autograd import quantized_linear, ste_quantize
+from .autograd import quantized_linear, ste_quantize, fused_quantized_linear, standard_quantized_linear
 
 
 class QuantizedLinear(nn.Module):
@@ -90,17 +90,13 @@ class QuantizedLinear(nn.Module):
             # Update quantizer beta parameter
             self.quantizer.lattice.beta.data = initial_beta
     
-    def _get_lookup_table(self) -> torch.Tensor:
-        """Get or create lookup table for efficient computation."""
-        if self._lookup_table is None:
-            self._lookup_table = self.quantizer.create_lookup_table()
-            if not hasattr(self, '_lookup_table'):
-                self.register_buffer('_lookup_table', self._lookup_table)
-        return self._lookup_table
     
     def forward(self, input: torch.Tensor, depth: int = -1) -> torch.Tensor:
         """
         Forward pass for quantized linear layer.
+        
+        This method provides a clean interface similar to standard PyTorch linear layers:
+        output = Wx + b (in quantized space)
         
         Args:
             input: Input tensor of shape [batch_size, in_features]
@@ -110,74 +106,14 @@ class QuantizedLinear(nn.Module):
             output: Output tensor of shape [batch_size, out_features]
         """
         if self.use_lookup_tables:
-            return self._forward_with_lookup_tables(input, depth)
+            return fused_quantized_linear(
+                input, self.weight, self.bias, self.quantizer, depth, self.use_ste
+            )
         else:
-            return self._forward_standard(input, depth)
+            return standard_quantized_linear(
+                input, self.weight, self.bias, self.quantizer, depth
+            )
     
-    def _forward_with_lookup_tables(self, input: torch.Tensor, depth: int) -> torch.Tensor:
-        """Forward pass using lookup tables for efficient computation."""
-        # Quantize input to get indices
-        input_quantized, input_indices = self.quantizer.quantize_to_depth(input, depth)
-        
-        # Quantize weights to get indices
-        weight_quantized, weight_indices = self.quantizer.quantize_to_depth(self.weight, depth)
-        
-        # Perform efficient matrix multiplication using lookup tables
-        # This computes dot products in quantized space using precomputed LUTs
-        batch_size, in_features = input.shape
-        out_features = self.weight.shape[0]
-        num_blocks = input_indices.shape[1]
-        
-        # Initialize output tensor
-        output = torch.zeros(batch_size, out_features, device=input.device, dtype=input.dtype)
-        
-        # For each output neuron and batch item, compute dot product using lookup table
-        for out_idx in range(out_features):
-            for batch_idx in range(batch_size):
-                # Get indices for this combination
-                input_idx = input_indices[batch_idx]  # Shape: [num_blocks, lattice_dim]
-                weight_idx = weight_indices[out_idx]  # Shape: [num_blocks, lattice_dim]
-                
-                # Compute dot product for each block using lookup table
-                block_dot_products = []
-                for block_idx in range(num_blocks):
-                    # Get single block indices
-                    input_block = input_idx[block_idx]  # Shape: [lattice_dim]
-                    weight_block = weight_idx[block_idx]  # Shape: [lattice_dim]
-                    
-                    # Compute dot product using lookup table
-                    # The lookup_dot_product returns element-wise lookups, so we need to sum them
-                    dot_product_elements = self.quantizer.lookup_dot_product(
-                        input_block.unsqueeze(0), 
-                        weight_block.unsqueeze(0)
-                    )
-                    # Sum the elements to get the actual dot product
-                    block_dot_product = dot_product_elements.sum().item()
-                    block_dot_products.append(block_dot_product)
-                
-                # Sum over blocks
-                output[batch_idx, out_idx] = sum(block_dot_products)
-        
-        # Apply STE if enabled
-        if self.use_ste:
-            # Compute standard matrix multiplication for STE
-            standard_output = torch.matmul(input, self.weight.t())
-            output = ste_quantize(standard_output, output)
-        
-        # Add bias if present
-        if self.bias is not None:
-            output = output + self.bias
-        
-        return output
-    
-    def _forward_standard(self, input: torch.Tensor, depth: int) -> torch.Tensor:
-        """Standard forward pass without lookup tables."""
-        # Use custom autograd function
-        output = quantized_linear(
-            input, self.weight, self.bias, self.quantizer, self.config, depth
-        )
-        
-        return output
     
     def get_quantized_weights(self, depth: int = -1) -> torch.Tensor:
         """
