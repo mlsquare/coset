@@ -18,29 +18,22 @@ class TestLatticeConfig:
     def test_default_config(self):
         """Test default configuration creation."""
         config = LatticeConfig()
-        assert config.type == LatticeType.HNLQ
+        assert config.type == LatticeType.Z2
+        assert config.lattice_dim == 2  # Z2 lattice has dimension 2
         assert config.radix == 4
         assert config.num_layers == 3
-        assert config.lattice_dim == 8
-        assert len(config.scales) == 3
-        assert len(config.zero_points) == 3
     
     def test_custom_config(self):
         """Test custom configuration creation."""
         config = LatticeConfig(
             type=LatticeType.E8,
             radix=8,
-            num_layers=5,
-            lattice_dim=16,
-            scales=[1.0, 2.0, 4.0, 8.0, 16.0],
-            zero_points=[0, 0, 0, 0, 0]
+            num_layers=5
         )
         assert config.type == LatticeType.E8
         assert config.radix == 8
         assert config.num_layers == 5
-        assert config.lattice_dim == 16
-        assert config.scales == [1.0, 2.0, 4.0, 8.0, 16.0]
-        assert config.zero_points == [0, 0, 0, 0, 0]
+        assert config.lattice_dim == 8  # E8 lattice has dimension 8
     
     def test_invalid_config(self):
         """Test invalid configuration handling."""
@@ -50,19 +43,16 @@ class TestLatticeConfig:
         with pytest.raises(ValueError):
             LatticeConfig(num_layers=0)  # Invalid num_layers
         
+        # Test CUSTOM lattice without lattice_dim
         with pytest.raises(ValueError):
-            LatticeConfig(lattice_dim=0)  # Invalid lattice_dim
-        
-        with pytest.raises(ValueError):
-            LatticeConfig(scales=[1.0, 2.0])  # Mismatched scales length
+            LatticeConfig(type=LatticeType.CUSTOM)  # Missing lattice_dim for CUSTOM
     
     def test_config_serialization(self):
         """Test configuration serialization."""
         config = LatticeConfig(
             type=LatticeType.A2,
             radix=4,
-            num_layers=3,
-            lattice_dim=8
+            num_layers=3
         )
         
         # Convert to dict
@@ -70,14 +60,14 @@ class TestLatticeConfig:
         assert config_dict['type'] == 'a2'
         assert config_dict['radix'] == 4
         assert config_dict['num_layers'] == 3
-        assert config_dict['lattice_dim'] == 8
+        assert config_dict['lattice_dim'] == 2  # A2 lattice has dimension 2
         
         # Convert back from dict
         config_restored = LatticeConfig.from_dict(config_dict)
         assert config_restored.type == LatticeType.A2
         assert config_restored.radix == 4
         assert config_restored.num_layers == 3
-        assert config_restored.lattice_dim == 8
+        assert config_restored.lattice_dim == 2  # A2 lattice has dimension 2
 
 
 class TestLatticeQuantizer:
@@ -87,10 +77,9 @@ class TestLatticeQuantizer:
     def config(self):
         """Create test configuration."""
         return LatticeConfig(
-            type=LatticeType.HNLQ,
+            type=LatticeType.E8,
             radix=4,
-            num_layers=3,
-            lattice_dim=8
+            num_layers=3
         )
     
     @pytest.fixture
@@ -104,7 +93,7 @@ class TestLatticeQuantizer:
         assert quantizer.config == config
         assert quantizer.lattice_dim == 8
         assert quantizer.num_layers == 3
-        assert quantizer.radix == 4
+        assert quantizer.q == 4
     
     def test_single_level_quantization(self, quantizer):
         """Test single-level quantization."""
@@ -218,10 +207,9 @@ class TestQuantizedLinear:
     def config(self):
         """Create test configuration."""
         return LatticeConfig(
-            type=LatticeType.HNLQ,
+            type=LatticeType.E8,
             radix=4,
-            num_layers=3,
-            lattice_dim=8
+            num_layers=3
         )
     
     @pytest.fixture
@@ -320,10 +308,9 @@ class TestRadixQEncoder:
     def config(self):
         """Create test configuration."""
         return LatticeConfig(
-            type=LatticeType.HNLQ,
+            type=LatticeType.E8,
             radix=4,
-            num_layers=3,
-            lattice_dim=8
+            num_layers=3
         )
     
     @pytest.fixture
@@ -393,10 +380,9 @@ class TestQuantizedGradientHook:
     def config(self):
         """Create test configuration."""
         return LatticeConfig(
-            type=LatticeType.HNLQ,
+            type=LatticeType.E8,
             radix=4,
-            num_layers=3,
-            lattice_dim=8
+            num_layers=3
         )
     
     @pytest.fixture
@@ -483,10 +469,9 @@ class TestIntegration:
         """Test end-to-end quantization workflow."""
         # Create configuration
         config = LatticeConfig(
-            type=LatticeType.HNLQ,
+            type=LatticeType.E8,
             radix=4,
-            num_layers=3,
-            lattice_dim=8
+            num_layers=3
         )
         
         # Create quantizer
@@ -510,10 +495,9 @@ class TestIntegration:
         """Test MLP training with quantization."""
         # Create configuration
         config = LatticeConfig(
-            type=LatticeType.HNLQ,
+            type=LatticeType.E8,
             radix=4,
-            num_layers=3,
-            lattice_dim=8
+            num_layers=3
         )
         
         # Create MLP
@@ -546,10 +530,9 @@ class TestIntegration:
         """Test distributed training simulation."""
         # Create configuration
         config = LatticeConfig(
-            type=LatticeType.HNLQ,
+            type=LatticeType.E8,
             radix=4,
-            num_layers=3,
-            lattice_dim=8
+            num_layers=3
         )
         
         # Create hook

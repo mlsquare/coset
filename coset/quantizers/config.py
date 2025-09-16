@@ -58,7 +58,7 @@ class LatticeConfig:
             type: Type of lattice to use (E8=8D, A2=2D, Z2=2D, D4=4D, CUSTOM)
             radix: Base for HNLQ quantization (quantization parameter q)
             num_layers: Number of hierarchy levels for HNLQ encoding/decoding
-            lattice_dim: Dimension of the lattice (auto-set based on type, required for CUSTOM)
+            lattice_dim: Dimension of the lattice (auto-determined from type, only needed for CUSTOM)
             beta: Scaling parameter for quantization
             alpha: Scaling parameter for overload handling
             eps: Small perturbation parameter
@@ -71,15 +71,18 @@ class LatticeConfig:
         self.radix = radix
         self.num_layers = num_layers
         
-        # Set lattice dimension based on lattice type
-        if lattice_dim is None:
-            if type == LatticeType.CUSTOM:
+        # Automatically determine lattice dimension from lattice type
+        if type == LatticeType.CUSTOM:
+            if lattice_dim is None:
                 raise ValueError("lattice_dim must be specified for CUSTOM lattice type")
-            self.lattice_dim = type.get_dimension()
-        else:
-            if type != LatticeType.CUSTOM and lattice_dim != type.get_dimension():
-                raise ValueError(f"lattice_dim {lattice_dim} does not match {type.name} lattice dimension {type.get_dimension()}")
             self.lattice_dim = lattice_dim
+        else:
+            # For known lattice types, dimension is automatically determined
+            self.lattice_dim = type.get_dimension()
+            # Warn if user provided a conflicting lattice_dim
+            if lattice_dim is not None and lattice_dim != self.lattice_dim:
+                import warnings
+                warnings.warn(f"lattice_dim {lattice_dim} ignored for {type.name} lattice. Using {self.lattice_dim}.")
             
         self.beta = beta
         self.alpha = alpha
