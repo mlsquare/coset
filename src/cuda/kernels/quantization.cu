@@ -1,373 +1,231 @@
-#include "../include/quantization.h"
+#include <torch/extension.h>
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
-#include <cub/cub.cuh>
+#include <vector>
 
-// CUDA kernel implementations for quantization operations
+// CUDA kernel for E8 closest point function
+__device__ float custom_round_cuda(float x) {
+    return floorf(x + 0.5f);
+}
 
-__global__ void lattice_quantize_kernel(
-    const float* input,
-    int* indices,
-    const float* codebook,
-    const float* scales,
-    const int* zero_points,
-    int batch_size,
-    int seq_len,
-    int lattice_dim,
-    int num_codewords,
-    int depth
-) {
-    int batch_idx = blockIdx.x;
-    int seq_idx = blockIdx.y;
-    int thread_idx = threadIdx.x;
-    
-    if (batch_idx >= batch_size || seq_idx >= seq_len) return;
-    
-    int input_offset = (batch_idx * seq_len + seq_idx) * lattice_dim;
-    int output_offset = batch_idx * seq_len + seq_idx;
-    
-    // Get quantization parameters for this depth
-    float scale = scales[depth];
-    int zero_point = zero_points[depth];
-    
-    // Load input vector into shared memory
-    extern __shared__ float shared_input[];
-    if (thread_idx < lattice_dim) {
-        shared_input[thread_idx] = input[input_offset + thread_idx];
+__device__ float norm_squared_cuda(const float* x, int dim) {
+    float sum = 0.0f;
+    for (int i = 0; i < dim; i++) {
+        sum += x[i] * x[i];
     }
-    __syncthreads();
+    return sum;
+}
+
+__device__ void g_x_cuda(const float* x, float* g_x, int dim) {
+    float f_x[8];  // E8 lattice has dimension 8
+    float delta[8];
     
-    // Find closest lattice point
-    float min_distance = FLT_MAX;
-    int best_index = 0;
+    // Compute f_x and delta
+    for (int i = 0; i < dim; i++) {
+        f_x[i] = custom_round_cuda(x[i]);
+        delta[i] = fabsf(x[i] - f_x[i]);
+    }
     
-    for (int i = 0; i < num_codewords; i++) {
-        float distance = 0.0f;
-        
-        // Compute distance to lattice point
-        for (int j = 0; j < lattice_dim; j++) {
-            float diff = (shared_input[j] / scale + zero_point) - codebook[i * lattice_dim + j];
-            distance += diff * diff;
-        }
-        
-        if (distance < min_distance) {
-            min_distance = distance;
-            best_index = i;
+    // Find maximum delta
+    int k = 0;
+    float max_delta = delta[0];
+    for (int i = 1; i < dim; i++) {
+        if (delta[i] > max_delta) {
+            max_delta = delta[i];
+            k = i;
         }
     }
     
-    // Store result
-    if (thread_idx == 0) {
-        indices[output_offset] = best_index;
+    // Copy f_x to g_x
+    for (int i = 0; i < dim; i++) {
+        g_x[i] = f_x[i];
+    }
+    
+    // Update g_x[k]
+    float x_k = x[k];
+    float f_x_k = f_x[k];
+    
+    if (x_k >= 0.0f) {
+        g_x[k] = (f_x_k < x_k) ? (f_x_k + 1.0f) : (f_x_k - 1.0f);
+    } else {
+        g_x[k] = (f_x_k <= x_k) ? (f_x_k + 1.0f) : (f_x_k - 1.0f);
     }
 }
 
-__global__ void lattice_dequantize_kernel(
-    const int* indices,
+__global__ void closest_point_e8_kernel(
+    const float* input,
     float* output,
-    const float* codebook,
-    const float* scales,
-    const int* zero_points,
     int batch_size,
-    int seq_len,
-    int lattice_dim,
-    int depth
+    int dim
 ) {
-    int batch_idx = blockIdx.x;
-    int seq_idx = blockIdx.y;
-    int thread_idx = threadIdx.x;
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
     
-    if (batch_idx >= batch_size || seq_idx >= seq_len) return;
+    if (idx >= batch_size) return;
     
-    int input_offset = batch_idx * seq_len + seq_idx;
-    int output_offset = (batch_idx * seq_len + seq_idx) * lattice_dim;
+    const float* x = input + idx * dim;
+    float* y = output + idx * dim;
     
-    // Get quantization parameters
-    float scale = scales[depth];
-    int zero_point = zero_points[depth];
-    int index = indices[input_offset];
+    // Compute f_x
+    float f_x[8];
+    float sum_f_x = 0.0f;
+    for (int i = 0; i < dim; i++) {
+        f_x[i] = custom_round_cuda(x[i]);
+        sum_f_x += f_x[i];
+    }
     
-    // Dequantize
-    if (thread_idx < lattice_dim) {
-        float quantized_value = codebook[index * lattice_dim + thread_idx];
-        output[output_offset + thread_idx] = (quantized_value - zero_point) * scale;
+    // Compute y_0
+    float y_0[8];
+    if (fmodf(sum_f_x, 2.0f) == 0.0f) {
+        for (int i = 0; i < dim; i++) {
+            y_0[i] = f_x[i];
+        }
+    } else {
+        g_x_cuda(x, y_0, dim);
+    }
+    
+    // Compute f_x_shifted and g_x_shifted
+    float x_shifted[8];
+    for (int i = 0; i < dim; i++) {
+        x_shifted[i] = x[i] - 0.5f;
+    }
+    
+    float f_x_shifted[8];
+    float sum_f_x_shifted = 0.0f;
+    for (int i = 0; i < dim; i++) {
+        f_x_shifted[i] = custom_round_cuda(x_shifted[i]);
+        sum_f_x_shifted += f_x_shifted[i];
+    }
+    
+    float g_x_shifted[8];
+    g_x_cuda(x_shifted, g_x_shifted, dim);
+    
+    // Compute y_1
+    float y_1[8];
+    if (fmodf(sum_f_x_shifted, 2.0f) == 0.0f) {
+        for (int i = 0; i < dim; i++) {
+            y_1[i] = f_x_shifted[i] + 0.5f;
+        }
+    } else {
+        for (int i = 0; i < dim; i++) {
+            y_1[i] = g_x_shifted[i] + 0.5f;
+        }
+    }
+    
+    // Choose closest point
+    float norm_y_0 = norm_squared_cuda(y_0, dim);
+    float norm_y_1 = norm_squared_cuda(y_1, dim);
+    
+    if (norm_y_0 < norm_y_1) {
+        for (int i = 0; i < dim; i++) {
+            y[i] = y_0[i];
+        }
+    } else {
+        for (int i = 0; i < dim; i++) {
+            y[i] = y_1[i];
+        }
     }
 }
 
-__global__ void hierarchical_quantize_kernel(
+// Vectorized quantization kernel
+__global__ void vectorized_quantize_kernel(
     const float* input,
-    int* indices,
-    const float* codebook,
-    const float* scales,
-    const int* zero_points,
-    const float* hierarchy_weights,
+    const float* generator_matrix,
+    const float* inverse_generator_matrix,
+    const float* eps,
+    int* output_indices,
     int batch_size,
-    int seq_len,
     int lattice_dim,
-    int num_levels
+    float beta,
+    int q
 ) {
-    int batch_idx = blockIdx.x;
-    int seq_idx = blockIdx.y;
-    int level_idx = blockIdx.z;
-    int thread_idx = threadIdx.x;
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
     
-    if (batch_idx >= batch_size || seq_idx >= seq_len || level_idx >= num_levels) return;
+    if (idx >= batch_size) return;
     
-    int input_offset = (batch_idx * seq_len + seq_idx) * lattice_dim;
-    int output_offset = (batch_idx * seq_len + seq_idx) * num_levels + level_idx;
+    const float* x = input + idx * lattice_dim;
+    int* indices = output_indices + idx * lattice_dim;
     
-    // Get quantization parameters for this level
-    float scale = scales[level_idx];
-    int zero_point = zero_points[level_idx];
-    
-    // Load input vector into shared memory
-    extern __shared__ float shared_input[];
-    if (thread_idx < lattice_dim) {
-        shared_input[thread_idx] = input[input_offset + thread_idx];
+    // Scale by beta
+    float x_scaled[8];
+    for (int i = 0; i < lattice_dim; i++) {
+        x_scaled[i] = x[i] / beta;
     }
-    __syncthreads();
     
-    // Find closest lattice point
-    float min_distance = FLT_MAX;
-    int best_index = 0;
+    // Add epsilon
+    float x_with_eps[8];
+    for (int i = 0; i < lattice_dim; i++) {
+        x_with_eps[i] = x_scaled[i] + eps[i];
+    }
     
-    for (int i = 0; i < (1 << lattice_dim); i++) {
-        float distance = 0.0f;
-        
-        // Compute distance to lattice point
+    // Find closest point (simplified for now)
+    float closest_point[8];
+    for (int i = 0; i < lattice_dim; i++) {
+        closest_point[i] = custom_round_cuda(x_with_eps[i]);
+    }
+    
+    // Matrix multiplication with inverse generator matrix
+    for (int i = 0; i < lattice_dim; i++) {
+        float sum = 0.0f;
         for (int j = 0; j < lattice_dim; j++) {
-            float diff = (shared_input[j] / scale + zero_point) - codebook[i * lattice_dim + j];
-            distance += diff * diff;
+            sum += closest_point[j] * inverse_generator_matrix[j * lattice_dim + i];
         }
-        
-        if (distance < min_distance) {
-            min_distance = distance;
-            best_index = i;
-        }
-    }
-    
-    // Store result
-    if (thread_idx == 0) {
-        indices[output_offset] = best_index;
+        indices[i] = (int)fmodf(sum, (float)q);
     }
 }
 
-__global__ void radixq_encode_kernel(
-    const float* input,
-    int* encoded,
-    int radix,
-    int depth,
-    int size
+torch::Tensor closest_point_e8_cuda(torch::Tensor input) {
+    auto device = input.device();
+    auto batch_size = input.size(0);
+    auto dim = input.size(1);
+    
+    auto output = torch::zeros_like(input);
+    
+    // Launch kernel
+    int threads_per_block = 256;
+    int blocks = (batch_size + threads_per_block - 1) / threads_per_block;
+    
+    closest_point_e8_kernel<<<blocks, threads_per_block>>>(
+        input.data_ptr<float>(),
+        output.data_ptr<float>(),
+        batch_size,
+        dim
+    );
+    
+    cudaDeviceSynchronize();
+    return output;
+}
+
+torch::Tensor vectorized_quantize_cuda(
+    torch::Tensor input,
+    torch::Tensor generator_matrix,
+    torch::Tensor inverse_generator_matrix,
+    torch::Tensor eps,
+    float beta,
+    int q
 ) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    auto device = input.device();
+    auto batch_size = input.size(0);
+    auto lattice_dim = input.size(1);
     
-    if (idx >= size) return;
+    auto output_indices = torch::zeros({batch_size, lattice_dim}, 
+                                      torch::TensorOptions().dtype(torch::kInt32).device(device));
     
-    // Convert to radix-q representation
-    int value = (int)input[idx];
-    int encoded_value = 0;
+    // Launch kernel
+    int threads_per_block = 256;
+    int blocks = (batch_size + threads_per_block - 1) / threads_per_block;
     
-    for (int i = 0; i < depth; i++) {
-        encoded_value += (value % radix) * (int)powf(radix, i);
-        value = value / radix;
-    }
+    vectorized_quantize_kernel<<<blocks, threads_per_block>>>(
+        input.data_ptr<float>(),
+        generator_matrix.data_ptr<float>(),
+        inverse_generator_matrix.data_ptr<float>(),
+        eps.data_ptr<float>(),
+        output_indices.data_ptr<int>(),
+        batch_size,
+        lattice_dim,
+        beta,
+        q
+    );
     
-    encoded[idx] = encoded_value;
-}
-
-__global__ void radixq_decode_kernel(
-    const int* encoded,
-    float* output,
-    int radix,
-    int depth,
-    int size
-) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    
-    if (idx >= size) return;
-    
-    // Convert from radix-q representation
-    int encoded_value = encoded[idx];
-    int decoded_value = 0;
-    
-    for (int i = 0; i < depth; i++) {
-        decoded_value += (encoded_value % radix) * (int)powf(radix, i);
-        encoded_value = encoded_value / radix;
-    }
-    
-    output[idx] = decoded_value;
-}
-
-__global__ void gradient_quantize_kernel(
-    const float* gradients,
-    int* quantized_gradients,
-    const float* codebook,
-    const float* scales,
-    int size,
-    int depth
-) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    
-    if (idx >= size) return;
-    
-    // Get quantization parameters
-    float scale = scales[depth];
-    
-    // Quantize gradient
-    float normalized = gradients[idx] / scale;
-    int quantized = (int)roundf(normalized);
-    
-    // Clamp to valid range
-    int max_value = (1 << 8) - 1;  // 8-bit quantization
-    quantized = max(0, min(quantized, max_value));
-    
-    quantized_gradients[idx] = quantized;
-}
-
-__global__ void quantized_gradient_accumulate_kernel(
-    int* accumulated_gradients,
-    const int* new_gradients,
-    int size,
-    int depth
-) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    
-    if (idx >= size) return;
-    
-    // Accumulate in quantized space
-    accumulated_gradients[idx] += new_gradients[idx];
-}
-
-// Wrapper functions
-extern "C" {
-    void lattice_quantize_cuda(
-        const float* input,
-        int* indices,
-        const float* codebook,
-        const float* scales,
-        const int* zero_points,
-        int batch_size,
-        int seq_len,
-        int lattice_dim,
-        int num_codewords,
-        int depth,
-        cudaStream_t stream
-    ) {
-        dim3 grid(batch_size, seq_len);
-        dim3 block(lattice_dim);
-        size_t shared_mem_size = lattice_dim * sizeof(float);
-        
-        lattice_quantize_kernel<<<grid, block, shared_mem_size, stream>>>(
-            input, indices, codebook, scales, zero_points,
-            batch_size, seq_len, lattice_dim, num_codewords, depth
-        );
-    }
-    
-    void lattice_dequantize_cuda(
-        const int* indices,
-        float* output,
-        const float* codebook,
-        const float* scales,
-        const int* zero_points,
-        int batch_size,
-        int seq_len,
-        int lattice_dim,
-        int depth,
-        cudaStream_t stream
-    ) {
-        dim3 grid(batch_size, seq_len);
-        dim3 block(lattice_dim);
-        
-        lattice_dequantize_kernel<<<grid, block, 0, stream>>>(
-            indices, output, codebook, scales, zero_points,
-            batch_size, seq_len, lattice_dim, depth
-        );
-    }
-    
-    void hierarchical_quantize_cuda(
-        const float* input,
-        int* indices,
-        const float* codebook,
-        const float* scales,
-        const int* zero_points,
-        const float* hierarchy_weights,
-        int batch_size,
-        int seq_len,
-        int lattice_dim,
-        int num_levels,
-        cudaStream_t stream
-    ) {
-        dim3 grid(batch_size, seq_len, num_levels);
-        dim3 block(lattice_dim);
-        size_t shared_mem_size = lattice_dim * sizeof(float);
-        
-        hierarchical_quantize_kernel<<<grid, block, shared_mem_size, stream>>>(
-            input, indices, codebook, scales, zero_points, hierarchy_weights,
-            batch_size, seq_len, lattice_dim, num_levels
-        );
-    }
-    
-    void radixq_encode_cuda(
-        const float* input,
-        int* encoded,
-        int radix,
-        int depth,
-        int size,
-        cudaStream_t stream
-    ) {
-        int block_size = 256;
-        int grid_size = (size + block_size - 1) / block_size;
-        
-        radixq_encode_kernel<<<grid_size, block_size, 0, stream>>>(
-            input, encoded, radix, depth, size
-        );
-    }
-    
-    void radixq_decode_cuda(
-        const int* encoded,
-        float* output,
-        int radix,
-        int depth,
-        int size,
-        cudaStream_t stream
-    ) {
-        int block_size = 256;
-        int grid_size = (size + block_size - 1) / block_size;
-        
-        radixq_decode_kernel<<<grid_size, block_size, 0, stream>>>(
-            encoded, output, radix, depth, size
-        );
-    }
-    
-    void gradient_quantize_cuda(
-        const float* gradients,
-        int* quantized_gradients,
-        const float* codebook,
-        const float* scales,
-        int size,
-        int depth,
-        cudaStream_t stream
-    ) {
-        int block_size = 256;
-        int grid_size = (size + block_size - 1) / block_size;
-        
-        gradient_quantize_kernel<<<grid_size, block_size, 0, stream>>>(
-            gradients, quantized_gradients, codebook, scales, size, depth
-        );
-    }
-    
-    void quantized_gradient_accumulate_cuda(
-        int* accumulated_gradients,
-        const int* new_gradients,
-        int size,
-        int depth,
-        cudaStream_t stream
-    ) {
-        int block_size = 256;
-        int grid_size = (size + block_size - 1) / block_size;
-        
-        quantized_gradient_accumulate_kernel<<<grid_size, block_size, 0, stream>>>(
-            accumulated_gradients, new_gradients, size, depth
-        );
-    }
+    cudaDeviceSynchronize();
+    return output_indices;
 }
