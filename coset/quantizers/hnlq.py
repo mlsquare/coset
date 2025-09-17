@@ -28,6 +28,37 @@ import math
 
 from .config import LatticeConfig, LatticeType
 
+# Optional CUDA kernel imports
+try:
+    from .cuda_kernels import (
+        closest_point_e8_cuda, vectorized_quantize_cuda, 
+        quantized_matmul_cuda, batch_product_quantize_cuda
+    )
+    CUDA_KERNELS_AVAILABLE = True
+except ImportError:
+    CUDA_KERNELS_AVAILABLE = False
+
+try:
+    from .quantization_cuda_kernels import (
+        closest_point_e8_quantization_cuda,
+        vectorized_encode_decode_cuda,
+        batch_quantize_cuda,
+        ultra_fast_quantize_cuda
+    )
+    QUANTIZATION_CUDA_KERNELS_AVAILABLE = True
+except ImportError:
+    QUANTIZATION_CUDA_KERNELS_AVAILABLE = False
+
+try:
+    from .optimized_quantization_cuda_kernels import (
+        optimized_closest_point_e8_cuda,
+        optimized_ultra_fast_quantize_cuda,
+        optimized_vectorized_encode_decode_cuda
+    )
+    OPTIMIZED_QUANTIZATION_CUDA_KERNELS_AVAILABLE = True
+except ImportError:
+    OPTIMIZED_QUANTIZATION_CUDA_KERNELS_AVAILABLE = False
+
 
 def custom_round(x, tiny=None):
     """
@@ -145,6 +176,17 @@ def closest_point_Dn(x):
 
 def closest_point_E8(x):
     """Find the closest point in the E_8 lattice."""
+    # Use optimized quantization CUDA kernel if available and input is on CUDA
+    if OPTIMIZED_QUANTIZATION_CUDA_KERNELS_AVAILABLE and x.is_cuda and x.dim() == 2:
+        return optimized_closest_point_e8_cuda(x)
+    # Fallback to regular quantization CUDA kernel
+    elif QUANTIZATION_CUDA_KERNELS_AVAILABLE and x.is_cuda and x.dim() == 2:
+        return closest_point_e8_quantization_cuda(x)
+    # Fallback to general CUDA kernel
+    elif CUDA_KERNELS_AVAILABLE and x.is_cuda and x.dim() == 2:
+        return closest_point_e8_cuda(x)
+    
+    # Fallback to original implementation
     f_x = custom_round(x)
     
     # Handle both 1D and 2D inputs
@@ -208,15 +250,39 @@ class LatticeCodebook(nn.Module):
         self.q = config.radix  # Use radix as quantization parameter q
         
         # Initialize lattice components
-        self.G, self.Q_nn = self._init_lattice_components()
-        self.G_inv = torch.linalg.inv(self.G)
+        G_temp, self.Q_nn = self._init_lattice_components()
+        G_inv_temp = torch.linalg.inv(G_temp)
         
         # Initialize scaling parameters
         self.beta = nn.Parameter(torch.tensor(1.0))  # Scaling parameter
         self.alpha = nn.Parameter(torch.tensor(1.0))  # Overload scaling parameter
         
         # Initialize dither for tie breaking
-        self.eps = self._generate_tie_dither(self.G.shape[0])  # Use actual lattice dimension
+        eps_temp = self._generate_tie_dither(G_temp.shape[0])  # Use actual lattice dimension
+        
+        # Register tensors as buffers so they move with the module when .to(device) is called
+        self.register_buffer('G_buffer', G_temp)
+        self.register_buffer('G_inv_buffer', G_inv_temp)
+        self.register_buffer('eps_buffer', eps_temp)
+        
+        # Update references to use buffers (these will automatically move to the correct device)
+        self.G = self.G_buffer
+        self.G_inv = self.G_inv_buffer
+        self.eps = self.eps_buffer
+    
+    def to(self, *args, **kwargs):
+        """Override to() method to ensure proper device placement"""
+        # Call parent to() method
+        result = super().to(*args, **kwargs)
+        
+        # Ensure all tensor references are updated to use buffers
+        # This is critical because the references need to point to the moved buffers
+        if hasattr(self, 'G_buffer') and hasattr(self, 'G_inv_buffer') and hasattr(self, 'eps_buffer'):
+            self.G = self.G_buffer
+            self.G_inv = self.G_inv_buffer
+            self.eps = self.eps_buffer
+        
+        return result
         
     def _init_lattice_components(self) -> Tuple[torch.Tensor, Callable]:
         """Initialize generator matrix and closest point function."""
@@ -240,17 +306,17 @@ class LatticeCodebook(nn.Module):
         
         # Very small relative to scale & lattice packing radius
         eta = 2.0**-40
-        delta = eta * self.beta * 0.5  # Using 0.5 as default Rin
+        delta = eta * 1.0 * 0.5  # Use constant value instead of self.beta to avoid initialization issues
         
         return delta * u
     
     def get_generator_matrix(self) -> torch.Tensor:
         """Get the generator matrix."""
-        return self.G
+        return self.G_buffer
     
     def get_inverse_generator_matrix(self) -> torch.Tensor:
         """Get the inverse generator matrix."""
-        return self.G_inv
+        return self.G_inv_buffer
     
     def get_closest_point_function(self) -> Callable:
         """Get the closest point function."""
@@ -266,7 +332,7 @@ class LatticeCodebook(nn.Module):
     
     def get_eps(self) -> torch.Tensor:
         """Get the tie dither."""
-        return self.eps
+        return self.eps_buffer
 
 
 class LatticeQuantizer(nn.Module):
@@ -285,20 +351,25 @@ class LatticeQuantizer(nn.Module):
     - Gradient quantization for distributed training
     """
     
-    def __init__(self, config: LatticeConfig):
+    def __init__(self, config: LatticeConfig, use_cuda_kernels: bool = True):
         super().__init__()
         self.config = config
         self.lattice_dim = config.lattice_dim
         self.num_layers = config.num_layers
         self.q = config.radix  # Use radix as quantization parameter q
+        self.use_cuda_kernels = use_cuda_kernels and CUDA_KERNELS_AVAILABLE
         
         # Initialize lattice components
         self.lattice = LatticeCodebook(config)
         
         # Initialize lookup tables (lazy initialization)
-        self._dot_product_lut = None
-        self._add_lut = None
-        self._radix_tables = None
+        # Register as buffers so they move with the module
+        self.register_buffer('_dot_product_lut', None)
+        self.register_buffer('_add_lut', None)
+        self.register_buffer('_radix_tables', None)
+        
+        # Enable vectorized processing for performance optimization
+        self._vectorized_quantize_blocks = self._vectorized_quantize_blocks
     
     def _encode(self, x: torch.Tensor, with_dither: bool = False) -> Tuple[Tuple[torch.Tensor, ...], bool]:
         """
@@ -446,21 +517,362 @@ class LatticeQuantizer(nn.Module):
         # Reshape to process in blocks
         x_reshaped = x_padded.view(*batch_dims, num_blocks, lattice_dim)
         
-        # Apply block function to each block
-        result_blocks = []
-        for i in range(num_blocks):
-            block = x_reshaped[..., i, :]  # Shape: (batch_dims..., lattice_dim)
-            quantized_block = block_func(block)
-            result_blocks.append(quantized_block)
+        # OPTIMIZATION: Vectorize block processing instead of sequential loop
+        # Process all blocks simultaneously using vectorized operations
+        if hasattr(self, '_vectorized_quantize_blocks'):
+            # Use optimized vectorized implementation
+            result_reshaped = self._vectorized_quantize_blocks(x_reshaped, block_func)
+        else:
+            # Fallback to original sequential processing for compatibility
+            result_blocks = []
+            for i in range(num_blocks):
+                block = x_reshaped[..., i, :]  # Shape: (batch_dims..., lattice_dim)
+                quantized_block = block_func(block)
+                result_blocks.append(quantized_block)
+            
+            # Concatenate results
+            result_reshaped = torch.stack(result_blocks, dim=-2)  # Shape: (batch_dims..., num_blocks, lattice_dim)
         
-        # Concatenate results
-        result_reshaped = torch.stack(result_blocks, dim=-2)  # Shape: (batch_dims..., num_blocks, lattice_dim)
+        # Reshape back to original format
         result_padded = result_reshaped.view(*batch_dims, padded_dim)
         
         # Remove padding to restore original shape
         result = result_padded[..., :input_dim]
         
         return result
+    
+    def _vectorized_quantize_blocks(self, x_reshaped: torch.Tensor, block_func) -> torch.Tensor:
+        """
+        Vectorized block quantization for GPU optimization.
+        
+        Args:
+            x_reshaped: Input tensor of shape (..., num_blocks, lattice_dim)
+            block_func: Function to apply to each block
+            
+        Returns:
+            result: Quantized tensor of same shape
+        """
+        # Get dimensions
+        batch_dims = x_reshaped.shape[:-2]
+        num_blocks = x_reshaped.shape[-2]
+        lattice_dim = x_reshaped.shape[-1]
+        
+        # Reshape to process all blocks simultaneously
+        # Shape: (total_batch_size, num_blocks, lattice_dim)
+        total_batch_size = 1
+        for dim in batch_dims:
+            total_batch_size *= dim
+        
+        x_flat = x_reshaped.view(total_batch_size, num_blocks, lattice_dim)
+        
+        # Vectorized encoding for all blocks simultaneously
+        # Shape: (total_batch_size, num_blocks, lattice_dim)
+        quantized_flat = self._vectorized_encode_and_decode(x_flat)
+        
+        # Reshape back to original format
+        result = quantized_flat.view(*batch_dims, num_blocks, lattice_dim)
+        
+        return result
+    
+    def _vectorized_encode_and_decode(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Vectorized encoding and decoding for multiple blocks.
+        
+        Args:
+            x: Input tensor of shape (batch_size, num_blocks, lattice_dim)
+            
+        Returns:
+            quantized: Quantized tensor of same shape
+        """
+        # Use optimized CUDA kernel if available and conditions are met
+        if (OPTIMIZED_QUANTIZATION_CUDA_KERNELS_AVAILABLE and 
+            x.is_cuda and x.dim() == 3):
+            return optimized_vectorized_encode_decode_cuda(
+                x,
+                self.lattice.get_generator_matrix(),
+                self.lattice.get_inverse_generator_matrix(),
+                self.lattice.get_eps(),
+                self.lattice.get_beta(),
+                self.q
+            )
+        # Fallback to regular CUDA kernel
+        elif (QUANTIZATION_CUDA_KERNELS_AVAILABLE and 
+              x.is_cuda and x.dim() == 3):
+            return vectorized_encode_decode_cuda(
+                x,
+                self.lattice.get_generator_matrix(),
+                self.lattice.get_inverse_generator_matrix(),
+                self.lattice.get_eps(),
+                self.lattice.get_beta(),
+                self.q
+            )
+        
+        # Fallback to original implementation
+        batch_size, num_blocks, lattice_dim = x.shape
+        
+        # Scale by beta
+        x_scaled = x / self.lattice.get_beta()
+        
+        # Handle closest point function for each block individually to avoid tensor shape issues
+        # This is still much faster than the original sequential approach
+        x_l_list = []
+        for i in range(num_blocks):
+            block = x_scaled[:, i, :]  # (batch_size, lattice_dim)
+            # Apply closest point function to each block
+            block_result = self.lattice.get_closest_point_function()(block + self.lattice.get_eps())
+            x_l_list.append(block_result)
+        
+        # Stack results
+        x_l = torch.stack(x_l_list, dim=1)  # (batch_size, num_blocks, lattice_dim)
+        
+        # Vectorized matrix multiplication for all blocks
+        # Reshape for batch matrix multiplication
+        x_l_flat = x_l.view(-1, lattice_dim)  # (batch_size * num_blocks, lattice_dim)
+        
+        # Batch matrix multiplication
+        b_i_flat = torch.matmul(x_l_flat, self.lattice.get_inverse_generator_matrix())
+        b_i_flat = torch.fmod(b_i_flat, self.q)
+        b_i_flat = custom_round(b_i_flat).int()
+        
+        # Reshape back
+        b_i = b_i_flat.view(batch_size, num_blocks, lattice_dim)
+        
+        # Vectorized decoding
+        # Reshape for batch matrix multiplication
+        b_i_flat = b_i.float().view(-1, lattice_dim)
+        
+        # Batch matrix multiplication for decoding
+        decoded_flat = torch.matmul(b_i_flat, self.lattice.get_generator_matrix())
+        
+        # Reshape back and scale
+        decoded = decoded_flat.view(batch_size, num_blocks, lattice_dim)
+        result = decoded * self.lattice.get_beta()
+        
+        return result
+    
+    def _vectorized_quantize_to_depth(self, x: torch.Tensor, depth: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Vectorized quantization to specific depth for better performance.
+        
+        This method uses the vectorized quantization path for faster processing.
+        
+        Args:
+            x: Input tensor of arbitrary shape (..., input_dim)
+            depth: Quantization depth (0 for single layer)
+            
+        Returns:
+            quantized: Quantized tensor
+            indices: Quantization indices
+        """
+        if depth == -1:
+            depth = self.num_layers - 1
+        
+        if depth < 0 or depth >= self.num_layers:
+            raise ValueError(f"Depth {depth} out of range [0, {self.num_layers-1}]")
+        
+        # Use optimized ultra-fast CUDA kernel if available and conditions are met
+        if (self.use_cuda_kernels and OPTIMIZED_QUANTIZATION_CUDA_KERNELS_AVAILABLE and 
+            x.is_cuda and x.dim() == 2 and depth == 0):
+            return optimized_ultra_fast_quantize_cuda(
+                x, 
+                self.lattice.get_generator_matrix(),
+                self.lattice.get_inverse_generator_matrix(),
+                self.lattice.get_eps(),
+                self.lattice.get_beta(),
+                self.q
+            )
+        # Fallback to regular ultra-fast CUDA kernel
+        elif (self.use_cuda_kernels and QUANTIZATION_CUDA_KERNELS_AVAILABLE and 
+              x.is_cuda and x.dim() == 2 and depth == 0):
+            return ultra_fast_quantize_cuda(
+                x, 
+                self.lattice.get_generator_matrix(),
+                self.lattice.get_inverse_generator_matrix(),
+                self.lattice.get_eps(),
+                self.lattice.get_beta(),
+                self.q
+            )
+        # Fallback to batch CUDA kernel
+        elif (self.use_cuda_kernels and CUDA_KERNELS_AVAILABLE and 
+              x.is_cuda and x.dim() == 2 and depth == 0):
+            return batch_product_quantize_cuda(
+                x, 
+                self.lattice.get_generator_matrix(),
+                self.lattice.get_inverse_generator_matrix(),
+                self.lattice.get_eps(),
+                self.lattice.get_beta(),
+                self.q
+            )
+        
+        # Use vectorized quantization
+        quantized = self._product_quantize(x, self.quantize_block)
+        
+        # Get indices using vectorized encoding
+        indices = self._vectorized_encode_to_depth(x, depth)
+        
+        return quantized, indices
+    
+    def _vectorized_encode_to_depth(self, x: torch.Tensor, depth: int) -> torch.Tensor:
+        """
+        Vectorized encoding to specific depth.
+        
+        Args:
+            x: Input tensor
+            depth: Target depth
+            
+        Returns:
+            indices: Encoded indices tensor
+        """
+        original_shape = x.shape
+        input_dim = original_shape[-1]
+        lattice_dim = self.lattice_dim
+        
+        # If input dimension matches lattice dimension, process directly
+        if input_dim == lattice_dim:
+            return self._encode_single_block(x, depth)
+        
+        # Reshape for block processing
+        batch_dims = original_shape[:-1]
+        num_blocks = (input_dim + lattice_dim - 1) // lattice_dim
+        
+        # Pad and reshape
+        padded_dim = num_blocks * lattice_dim
+        if input_dim < padded_dim:
+            padding_shape = list(batch_dims) + [padded_dim - input_dim]
+            padding = torch.zeros(padding_shape, dtype=x.dtype, device=x.device)
+            x_padded = torch.cat([x, padding], dim=-1)
+        else:
+            x_padded = x
+        
+        x_reshaped = x_padded.view(*batch_dims, num_blocks, lattice_dim)
+        
+        # Vectorized encoding for all blocks
+        batch_size = 1
+        for dim in batch_dims:
+            batch_size *= dim
+        
+        x_flat = x_reshaped.view(batch_size, num_blocks, lattice_dim)
+        
+        # Vectorized encoding
+        encoded_flat = self._vectorized_encode_blocks_to_depth(x_flat, depth)
+        
+        # Reshape back
+        encoded = encoded_flat.view(*batch_dims, num_blocks, lattice_dim)
+        
+        return encoded
+    
+    def _vectorized_encode_blocks_to_depth(self, x: torch.Tensor, depth: int) -> torch.Tensor:
+        """
+        Fully vectorized encoding of blocks to specific depth.
+        
+        This implementation processes all blocks simultaneously using vectorized operations
+        for maximum GPU utilization and performance.
+        
+        Args:
+            x: Input tensor of shape (batch_size, num_blocks, lattice_dim)
+            depth: Target depth
+            
+        Returns:
+            encoded: Encoded indices of shape (batch_size, num_blocks, lattice_dim)
+        """
+        batch_size, num_blocks, lattice_dim = x.shape
+        
+        # Scale by beta
+        x_scaled = x / self.lattice.get_beta()
+        
+        # OPTIMIZATION: Fully vectorized closest point function
+        # Process all blocks simultaneously by reshaping
+        x_scaled_flat = x_scaled.view(-1, lattice_dim)  # (batch_size * num_blocks, lattice_dim)
+        
+        # Vectorized closest point function for all blocks at once
+        x_l_flat = self.lattice.get_closest_point_function()(x_scaled_flat + self.lattice.get_eps())
+        
+        # Reshape back
+        x_l = x_l_flat.view(batch_size, num_blocks, lattice_dim)
+        
+        # For single depth (depth=0), do fully vectorized encoding
+        if depth == 0:
+            # Vectorized matrix multiplication for all blocks simultaneously
+            x_l_flat = x_l.view(-1, lattice_dim)  # (batch_size * num_blocks, lattice_dim)
+            
+            # Batch matrix multiplication
+            b_i_flat = torch.matmul(x_l_flat, self.lattice.get_inverse_generator_matrix())
+            b_i_flat = torch.fmod(b_i_flat, self.q)
+            b_i_flat = custom_round(b_i_flat).int()
+            
+            # Reshape back
+            b_i = b_i_flat.view(batch_size, num_blocks, lattice_dim)
+            return b_i
+        else:
+            # For multi-depth, use optimized sequential encoding
+            result_blocks = []
+            for i in range(num_blocks):
+                block = x_l[:, i, :]  # (batch_size, lattice_dim)
+                encoded_block = self._encode_single_block_to_depth(block, depth)
+                result_blocks.append(encoded_block)
+            
+            return torch.stack(result_blocks, dim=1)
+    
+    def _encode_single_block_to_depth(self, x: torch.Tensor, depth: int) -> torch.Tensor:
+        """
+        Encode a single block to specific depth.
+        
+        Args:
+            x: Input tensor of shape (batch_size, lattice_dim)
+            depth: Target depth
+            
+        Returns:
+            encoded: Encoded tensor of shape (batch_size, lattice_dim)
+        """
+        x_l = x
+        for layer in range(depth + 1):
+            x_l = self.lattice.get_closest_point_function()(x_l + self.lattice.get_eps())
+            if layer < depth:
+                b_i = custom_round(torch.fmod(torch.matmul(x_l, self.lattice.get_inverse_generator_matrix()), self.q)).int()
+                x_l = x_l / self.q
+            else:
+                b_i = custom_round(torch.fmod(torch.matmul(x_l, self.lattice.get_inverse_generator_matrix()), self.q)).int()
+        
+        return b_i
+    
+    def batch_quantize_to_depth(self, inputs: torch.Tensor, depth: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Batch quantization to specific depth for multiple inputs.
+        
+        This method processes multiple input tensors simultaneously for maximum efficiency.
+        
+        Args:
+            inputs: Input tensor of shape (batch_size, ..., input_dim) or list of tensors
+            depth: Quantization depth (0 for single layer)
+            
+        Returns:
+            quantized_list: List of quantized tensors
+            indices_list: List of quantization indices
+        """
+        if isinstance(inputs, list):
+            # Process list of inputs
+            batch_size = len(inputs)
+            if batch_size == 0:
+                return [], []
+            
+            # Get the first input to determine shapes
+            first_input = inputs[0]
+            input_dim = first_input.shape[-1]
+            
+            # Stack all inputs into a single tensor for batch processing
+            stacked_inputs = torch.stack(inputs, dim=0)  # (batch_size, ..., input_dim)
+            
+            # Batch quantize
+            batch_quantized, batch_indices = self._vectorized_quantize_to_depth(stacked_inputs, depth)
+            
+            # Split back into individual tensors
+            quantized_list = [batch_quantized[i] for i in range(batch_size)]
+            indices_list = [batch_indices[i] for i in range(batch_size)]
+            
+            return quantized_list, indices_list
+        else:
+            # Single tensor input - use vectorized method
+            return self._vectorized_quantize_to_depth(inputs, depth)
     
     def quantize_block(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -490,6 +902,12 @@ class LatticeQuantizer(nn.Module):
         if depth >= self.num_layers:
             raise ValueError(f"Depth {depth} exceeds number of layers {self.num_layers}")
         
+        # Use optimized vectorized quantization if available and conditions are met
+        if (self.use_cuda_kernels and OPTIMIZED_QUANTIZATION_CUDA_KERNELS_AVAILABLE and 
+            x.is_cuda and x.dim() == 2 and depth == 0):
+            return self._vectorized_quantize_to_depth(x, depth)
+        
+        # Fallback to original implementation
         return self._product_quantize_to_depth(x, depth)
     
     def _product_quantize_to_depth(self, x: torch.Tensor, depth: int) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -829,7 +1247,9 @@ class LatticeQuantizer(nn.Module):
             # Use a reasonable limit for lookup table size
             max_indices = min(16, self.q ** self.lattice_dim)
         
-        lookup_table = torch.zeros(max_indices, max_indices)
+        # Create lookup table on the same device as the module
+        device = next(self.parameters()).device
+        lookup_table = torch.zeros(max_indices, max_indices, device=device)
         
         # Create simple codebook for lookup table
         for i in range(max_indices):

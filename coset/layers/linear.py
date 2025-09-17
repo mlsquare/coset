@@ -13,7 +13,7 @@ from typing import Optional, Dict, Any
 from ..quantizers.config import LatticeConfig
 from ..quantizers.hnlq import LatticeQuantizer
 from ..quantizers.radixq import QuantizedGradientCompressor
-from .autograd import quantized_linear, ste_quantize, fused_quantized_linear, standard_quantized_linear
+from .autograd import quantized_linear, ste_quantize, fused_quantized_linear, fused_quantized_linear_cached, standard_quantized_linear
 
 
 class QuantizedLinear(nn.Module):
@@ -74,6 +74,10 @@ class QuantizedLinear(nn.Module):
         # Initialize lookup table (lazy initialization)
         self._lookup_table = None
         
+        # Initialize cached quantized weights (for performance optimization)
+        self._cached_weight_indices = None
+        self._weight_cache_valid = False
+        
         # Initialize quantization parameters
         self._init_quantization_params()
     
@@ -90,6 +94,18 @@ class QuantizedLinear(nn.Module):
             # Update quantizer beta parameter
             self.quantizer.lattice.beta.data = initial_beta
     
+    def _invalidate_weight_cache(self):
+        """Invalidate the cached weight indices."""
+        self._weight_cache_valid = False
+        self._cached_weight_indices = None
+    
+    def _get_cached_weight_indices(self, depth: int = 0):
+        """Get cached weight indices or compute and cache them."""
+        if not self._weight_cache_valid or self._cached_weight_indices is None:
+            # Quantize weights and cache the indices
+            _, self._cached_weight_indices = self.quantizer.quantize_to_depth(self.weight, depth)
+            self._weight_cache_valid = True
+        return self._cached_weight_indices
     
     def forward(self, input: torch.Tensor, depth: int = -1) -> torch.Tensor:
         """
@@ -106,8 +122,11 @@ class QuantizedLinear(nn.Module):
             output: Output tensor of shape [batch_size, out_features]
         """
         if self.use_lookup_tables:
-            return fused_quantized_linear(
-                input, self.weight, self.bias, self.quantizer, depth, self.use_ste
+            # Use cached weight indices for better performance
+            actual_depth = 0 if depth == -1 else depth
+            cached_weight_indices = self._get_cached_weight_indices(actual_depth)
+            return fused_quantized_linear_cached(
+                input, self.weight, cached_weight_indices, self.bias, self.quantizer, actual_depth, self.use_ste
             )
         else:
             return standard_quantized_linear(
