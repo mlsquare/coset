@@ -96,7 +96,8 @@ def cuda_vectorized_quantize_kernel(
     inverse_generator_matrix: torch.Tensor,
     eps: torch.Tensor,
     beta: float,
-    q: int
+    q: int,
+    disable_scaling: bool = False
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     CUDA-optimized vectorized quantization kernel.
@@ -115,8 +116,11 @@ def cuda_vectorized_quantize_kernel(
     """
     batch_size, lattice_dim = x.shape
     
-    # Scale by beta
-    x_scaled = x / beta
+    # Scale by beta (only if scaling is enabled)
+    if disable_scaling:
+        x_scaled = x
+    else:
+        x_scaled = x / beta
     
     # Add epsilon
     x_with_eps = x_scaled + eps
@@ -131,7 +135,10 @@ def cuda_vectorized_quantize_kernel(
     
     # Matrix multiplication with generator matrix for output
     decoded = torch.matmul(indices.float(), generator_matrix)
-    quantized = decoded * beta
+    if disable_scaling:
+        quantized = decoded
+    else:
+        quantized = decoded * beta
     
     return quantized, indices
 
@@ -193,7 +200,8 @@ def cuda_batch_product_quantize_kernel(
     inverse_generator_matrix: torch.Tensor,
     eps: torch.Tensor,
     beta: float,
-    q: int
+    q: int,
+    disable_scaling: bool = False
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     CUDA-optimized batch product quantization kernel.
@@ -235,7 +243,7 @@ def cuda_batch_product_quantize_kernel(
     for block_idx in range(num_blocks):
         block = x_blocks[:, block_idx, :]
         quantized_block, indices_block = cuda_vectorized_quantize_kernel(
-            block, generator_matrix, inverse_generator_matrix, eps, beta, q
+            block, generator_matrix, inverse_generator_matrix, eps, beta, q, disable_scaling
         )
         quantized_blocks[:, block_idx, :] = quantized_block
         indices_blocks[:, block_idx, :] = indices_block
@@ -283,7 +291,8 @@ def batch_product_quantize_cuda(
     inverse_generator_matrix: torch.Tensor,
     eps: torch.Tensor,
     beta: float,
-    q: int
+    q: int,
+    disable_scaling: bool = False
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """CUDA-optimized batch product quantization."""
-    return cuda_batch_product_quantize_kernel(x, generator_matrix, inverse_generator_matrix, eps, beta, q)
+    return cuda_batch_product_quantize_kernel(x, generator_matrix, inverse_generator_matrix, eps, beta, q, disable_scaling)

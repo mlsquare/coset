@@ -114,7 +114,8 @@ def cuda_vectorized_encode_decode_kernel(
     inverse_generator_matrix: torch.Tensor,
     eps: torch.Tensor,
     beta: float,
-    q: int
+    q: int,
+    disable_scaling: bool = False
 ) -> torch.Tensor:
     """
     CUDA-optimized vectorized encoding and decoding kernel.
@@ -135,8 +136,11 @@ def cuda_vectorized_encode_decode_kernel(
     """
     batch_size, num_blocks, lattice_dim = x.shape
     
-    # Scale by beta
-    x_scaled = x / beta
+    # Scale by beta (only if scaling is enabled)
+    if disable_scaling:
+        x_scaled = x
+    else:
+        x_scaled = x / beta
     
     # Add epsilon - broadcast across all blocks
     x_with_eps = x_scaled + eps.unsqueeze(0).unsqueeze(0)
@@ -165,9 +169,12 @@ def cuda_vectorized_encode_decode_kernel(
     # Batch matrix multiplication with generator matrix for decoding
     decoded_flat = torch.matmul(b_i_flat_float, generator_matrix)
     
-    # Reshape back and scale
+    # Reshape back and scale (only if scaling is enabled)
     decoded = decoded_flat.view(batch_size, num_blocks, lattice_dim)
-    result = decoded * beta
+    if disable_scaling:
+        result = decoded
+    else:
+        result = decoded * beta
     
     return result
 
@@ -351,10 +358,11 @@ def ultra_fast_quantize_cuda(
     inverse_generator_matrix: torch.Tensor,
     eps: torch.Tensor,
     beta: float,
-    q: int
+    q: int,
+    disable_scaling: bool = False
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Ultra-fast CUDA quantization kernel."""
-    return cuda_ultra_fast_quantize_kernel(x, generator_matrix, inverse_generator_matrix, eps, beta, q)
+    return cuda_ultra_fast_quantize_kernel(x, generator_matrix, inverse_generator_matrix, eps, beta, q, disable_scaling)
 
 # Export the kernels
 __all__ = [

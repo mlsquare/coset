@@ -23,7 +23,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from typing import Tuple, Optional, Union, List, Dict, Callable
+from typing import Tuple, Optional, Union, List, Dict, Callable, Any
 import math
 
 from .config import LatticeConfig, LatticeType
@@ -58,6 +58,26 @@ try:
     OPTIMIZED_QUANTIZATION_CUDA_KERNELS_AVAILABLE = True
 except ImportError:
     OPTIMIZED_QUANTIZATION_CUDA_KERNELS_AVAILABLE = False
+
+try:
+    from .improved_cuda_kernels import (
+        improved_quantize_cuda,
+        improved_fused_quantize_matmul_cuda,
+        improved_matmul_cuda
+    )
+    IMPROVED_CUDA_KERNELS_AVAILABLE = True
+except ImportError:
+    IMPROVED_CUDA_KERNELS_AVAILABLE = False
+
+try:
+    from .sparse_lookup_tables import (
+        SparseLookupTable,
+        CompressedLookupTable,
+        create_optimized_lookup_table
+    )
+    SPARSE_LOOKUP_TABLES_AVAILABLE = True
+except ImportError:
+    SPARSE_LOOKUP_TABLES_AVAILABLE = False
 
 
 def custom_round(x, tiny=None):
@@ -368,8 +388,17 @@ class LatticeQuantizer(nn.Module):
         self.register_buffer('_add_lut', None)
         self.register_buffer('_radix_tables', None)
         
+        # Optimized lookup table settings
+        self._use_optimized_lut = SPARSE_LOOKUP_TABLES_AVAILABLE
+        self._optimized_lut = None
+        self._lut_optimization_type = "auto"  # "sparse", "compressed", or "auto"
+        
         # Enable vectorized processing for performance optimization
         self._vectorized_quantize_blocks = self._vectorized_quantize_blocks
+        
+        # Batch-level optimization settings
+        self._batch_optimization_enabled = True
+        self._cached_batch_stats = None
     
     def _encode(self, x: torch.Tensor, with_dither: bool = False) -> Tuple[Tuple[torch.Tensor, ...], bool]:
         """
@@ -387,7 +416,8 @@ class LatticeQuantizer(nn.Module):
         batch_size = x.shape[0]
         
         # Scale by beta and add dither if requested
-        x = x / self.lattice.get_beta()
+        if not self.config.disable_scaling:
+            x = x / self.lattice.get_beta()
         if with_dither:
             # Generate random dither for each sample
             dither = torch.randn_like(x) * 0.1  # Small random dither
@@ -407,8 +437,11 @@ class LatticeQuantizer(nn.Module):
             # Scale for next level
             x_l = x_l / self.q
         
-        # Check for overload
-        overload_error = not torch.allclose(self.lattice.get_closest_point_function()(x_l), torch.zeros_like(x_l), atol=1e-8)
+        # Check for overload (only if overload protection is enabled)
+        if not self.config.disable_overload_protection:
+            overload_error = not torch.allclose(self.lattice.get_closest_point_function()(x_l), torch.zeros_like(x_l), atol=1e-8)
+        else:
+            overload_error = False
         
         return tuple(encoding_vectors), overload_error
     
@@ -422,14 +455,15 @@ class LatticeQuantizer(nn.Module):
         b_list, did_overload = self._encode(x, with_dither)
         t = 0
         
-        # Handle overload by scaling
-        while did_overload and t < 10:  # max_scaling_iterations
-            t += 1
-            x = x / (2**self.lattice.get_alpha())
-            b_list, did_overload = self._encode(x, with_dither)
-        
-        if did_overload:
-            print(f"Warning: Overload not resolved after 10 iterations")
+        # Handle overload by scaling (only if overload protection is enabled)
+        if not self.config.disable_overload_protection:
+            while did_overload and t < self.config.max_scaling_iterations:
+                t += 1
+                x = x / (2**self.lattice.get_alpha())
+                b_list, did_overload = self._encode(x, with_dither)
+            
+            if did_overload:
+                print(f"Warning: Overload not resolved after {self.config.max_scaling_iterations} iterations")
         
         return b_list, t
     
@@ -453,8 +487,9 @@ class LatticeQuantizer(nn.Module):
         for i, x_i in enumerate(x_hat_list):
             x_hat += (self.q ** i) * x_i
         
-        # Apply beta scaling
-        x_hat = self.lattice.get_beta() * x_hat
+        # Apply beta scaling (only if scaling is enabled)
+        if not self.config.disable_scaling:
+            x_hat = self.lattice.get_beta() * x_hat
         
         return x_hat
     
@@ -655,6 +690,7 @@ class LatticeQuantizer(nn.Module):
         Vectorized quantization to specific depth for better performance.
         
         This method uses the vectorized quantization path for faster processing.
+        Includes batch-level optimizations for improved performance.
         
         Args:
             x: Input tensor of arbitrary shape (..., input_dim)
@@ -670,6 +706,24 @@ class LatticeQuantizer(nn.Module):
         if depth < 0 or depth >= self.num_layers:
             raise ValueError(f"Depth {depth} out of range [0, {self.num_layers-1}]")
         
+        # Use batch-optimized quantization if enabled (but not from within batch optimization)
+        if (self._batch_optimization_enabled and x.dim() == 2 and depth == 0 and 
+            not hasattr(self, '_in_batch_optimization')):
+            return self._batch_optimized_quantize_to_depth(x, depth)
+        
+        # Use improved CUDA kernels if available (highest priority)
+        if (self.use_cuda_kernels and IMPROVED_CUDA_KERNELS_AVAILABLE and 
+            x.is_cuda and x.dim() == 2 and depth == 0):
+            return improved_quantize_cuda(
+                x, 
+                self.lattice.get_generator_matrix(),
+                self.lattice.get_inverse_generator_matrix(),
+                self.lattice.get_eps(),
+                self.lattice.get_beta(),
+                self.q,
+                self.config.disable_scaling
+            )
+        
         # Use optimized ultra-fast CUDA kernel if available and conditions are met
         if (self.use_cuda_kernels and OPTIMIZED_QUANTIZATION_CUDA_KERNELS_AVAILABLE and 
             x.is_cuda and x.dim() == 2 and depth == 0):
@@ -679,7 +733,8 @@ class LatticeQuantizer(nn.Module):
                 self.lattice.get_inverse_generator_matrix(),
                 self.lattice.get_eps(),
                 self.lattice.get_beta(),
-                self.q
+                self.q,
+                self.config.disable_scaling
             )
         # Fallback to regular ultra-fast CUDA kernel
         elif (self.use_cuda_kernels and QUANTIZATION_CUDA_KERNELS_AVAILABLE and 
@@ -690,7 +745,8 @@ class LatticeQuantizer(nn.Module):
                 self.lattice.get_inverse_generator_matrix(),
                 self.lattice.get_eps(),
                 self.lattice.get_beta(),
-                self.q
+                self.q,
+                self.config.disable_scaling
             )
         # Fallback to batch CUDA kernel
         elif (self.use_cuda_kernels and CUDA_KERNELS_AVAILABLE and 
@@ -701,7 +757,8 @@ class LatticeQuantizer(nn.Module):
                 self.lattice.get_inverse_generator_matrix(),
                 self.lattice.get_eps(),
                 self.lattice.get_beta(),
-                self.q
+                self.q,
+                self.config.disable_scaling
             )
         
         # Use vectorized quantization
@@ -711,6 +768,147 @@ class LatticeQuantizer(nn.Module):
         indices = self._vectorized_encode_to_depth(x, depth)
         
         return quantized, indices
+    
+    def _compute_batch_stats(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+        """
+        Compute batch-level statistics for optimization.
+        
+        Args:
+            x: Input tensor [batch_size, input_dim]
+            
+        Returns:
+            stats: Dictionary containing batch statistics
+        """
+        with torch.no_grad():
+            batch_size = x.shape[0]
+            
+            # Compute batch-level statistics
+            batch_mean = torch.mean(x, dim=0, keepdim=True)  # [1, input_dim]
+            batch_std = torch.std(x, dim=0, keepdim=True)    # [1, input_dim]
+            batch_max = torch.max(torch.abs(x), dim=0, keepdim=True)[0]  # [1, input_dim]
+            
+            # Global batch statistics
+            global_mean = torch.mean(x)
+            global_std = torch.std(x)
+            global_max = torch.max(torch.abs(x))
+            
+            return {
+                'batch_mean': batch_mean,
+                'batch_std': batch_std,
+                'batch_max': batch_max,
+                'global_mean': global_mean,
+                'global_std': global_std,
+                'global_max': global_max,
+                'batch_size': batch_size
+            }
+    
+    def _adaptive_batch_scaling(self, x: torch.Tensor, stats: Dict[str, torch.Tensor]) -> torch.Tensor:
+        """
+        Apply adaptive batch-level scaling for optimal quantization.
+        
+        Args:
+            x: Input tensor [batch_size, input_dim]
+            stats: Batch statistics
+            
+        Returns:
+            x_scaled: Scaled input tensor
+        """
+        if not self._batch_optimization_enabled:
+            return x
+        
+        # Use global statistics for batch-level scaling
+        global_std = stats['global_std']
+        global_max = stats['global_max']
+        
+        # Adaptive scaling based on batch statistics
+        if global_std > 0:
+            # Scale to normalize the batch
+            adaptive_scale = 1.0 / (global_std + 1e-8)
+            x_scaled = x * adaptive_scale
+        else:
+            x_scaled = x
+        
+        return x_scaled
+    
+    def _batch_optimized_quantize_to_depth(self, x: torch.Tensor, depth: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Batch-optimized quantization with adaptive scaling.
+        
+        Args:
+            x: Input tensor [batch_size, input_dim]
+            depth: Quantization depth
+            
+        Returns:
+            quantized: Quantized tensor
+            indices: Quantization indices
+        """
+        if not self._batch_optimization_enabled:
+            return self._vectorized_quantize_to_depth(x, depth)
+        
+        # Set flag to prevent recursion
+        self._in_batch_optimization = True
+        
+        try:
+            # Compute batch statistics
+            batch_stats = self._compute_batch_stats(x)
+            
+            # Apply adaptive batch scaling
+            x_scaled = self._adaptive_batch_scaling(x, batch_stats)
+            
+            # Use standard quantization on scaled input (without batch optimization)
+            quantized_scaled, indices = self._vectorized_quantize_to_depth(x_scaled, depth)
+            
+            # Apply inverse scaling to quantized output
+            if batch_stats['global_std'] > 0:
+                adaptive_scale = 1.0 / (batch_stats['global_std'] + 1e-8)
+                quantized = quantized_scaled / adaptive_scale
+            else:
+                quantized = quantized_scaled
+            
+            return quantized, indices
+        finally:
+            # Clear flag
+            delattr(self, '_in_batch_optimization')
+    
+    def enable_batch_optimization(self, enabled: bool = True):
+        """Enable or disable batch-level optimizations."""
+        self._batch_optimization_enabled = enabled
+    
+    def get_batch_optimization_stats(self) -> Dict[str, Any]:
+        """Get batch optimization statistics."""
+        return {
+            'batch_optimization_enabled': self._batch_optimization_enabled,
+            'cached_batch_stats': self._cached_batch_stats is not None
+        }
+    
+    def enable_optimized_lookup_tables(self, enabled: bool = True, optimization_type: str = "auto"):
+        """
+        Enable or disable optimized lookup tables.
+        
+        Args:
+            enabled: Whether to use optimized lookup tables
+            optimization_type: Type of optimization ("sparse", "compressed", or "auto")
+        """
+        self._use_optimized_lut = enabled and SPARSE_LOOKUP_TABLES_AVAILABLE
+        self._lut_optimization_type = optimization_type
+        
+        # Clear existing optimized lookup table to force recreation
+        if self._optimized_lut is not None:
+            self._optimized_lut = None
+    
+    def get_lookup_table_stats(self) -> Dict[str, Any]:
+        """Get lookup table optimization statistics."""
+        stats = {
+            'use_optimized_lut': self._use_optimized_lut,
+            'lut_optimization_type': self._lut_optimization_type,
+            'sparse_lookup_tables_available': SPARSE_LOOKUP_TABLES_AVAILABLE
+        }
+        
+        if self._optimized_lut is not None:
+            if hasattr(self._optimized_lut, 'get_compression_stats'):
+                stats.update(self._optimized_lut.get_compression_stats())
+        
+        return stats
     
     def _vectorized_encode_to_depth(self, x: torch.Tensor, depth: int) -> torch.Tensor:
         """
@@ -1240,14 +1438,28 @@ class LatticeQuantizer(nn.Module):
         Create lookup table for efficient dot product computation.
         
         This operation precomputes dot products between all possible
-        lattice point pairs for fast computation.
+        lattice point pairs for fast computation. Uses optimized lookup tables
+        when available for better memory efficiency.
         """
         # For Z2 lattice, we use a simpler approach with limited indices
         if max_indices == -1:
             # Use a reasonable limit for lookup table size
             max_indices = min(16, self.q ** self.lattice_dim)
         
-        # Create lookup table on the same device as the module
+        # Use optimized lookup table if available
+        if self._use_optimized_lut and SPARSE_LOOKUP_TABLES_AVAILABLE:
+            if self._optimized_lut is None:
+                self._optimized_lut = create_optimized_lookup_table(
+                    max_indices,
+                    self.lattice.get_generator_matrix(),
+                    self.lattice.get_inverse_generator_matrix(),
+                    self.lattice.get_beta(),
+                    self.q,
+                    self._lut_optimization_type
+                )
+            return self._optimized_lut
+        
+        # Fallback to standard lookup table
         device = next(self.parameters()).device
         lookup_table = torch.zeros(max_indices, max_indices, device=device)
         

@@ -113,7 +113,8 @@ def optimized_ultra_fast_quantize_kernel(
     inverse_generator_matrix: torch.Tensor,
     eps: torch.Tensor,
     beta: float,
-    q: int
+    q: int,
+    disable_scaling: bool = False
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Ultra-optimized quantization kernel with all bottlenecks removed.
@@ -184,7 +185,8 @@ def optimized_vectorized_encode_decode_kernel(
     inverse_generator_matrix: torch.Tensor,
     eps: torch.Tensor,
     beta: float,
-    q: int
+    q: int,
+    disable_scaling: bool = False
 ) -> torch.Tensor:
     """
     Optimized vectorized encoding and decoding with minimal operations.
@@ -196,8 +198,11 @@ def optimized_vectorized_encode_decode_kernel(
     """
     batch_size, num_blocks, lattice_dim = x.shape
     
-    # Scale and add epsilon - single operation
-    x_scaled = x / beta + eps.view(1, 1, -1)
+    # Scale and add epsilon - single operation (only if scaling is enabled)
+    if disable_scaling:
+        x_scaled = x + eps.view(1, 1, -1)
+    else:
+        x_scaled = x / beta + eps.view(1, 1, -1)
     
     # Flatten for batch processing - single reshape
     x_flat = x_scaled.reshape(-1, lattice_dim)
@@ -217,9 +222,12 @@ def optimized_vectorized_encode_decode_kernel(
     # Vectorized decoding - single matrix multiplication
     decoded_flat = torch.matmul(b_i_flat.float(), generator_matrix)
     
-    # Reshape back and scale - single operation
+    # Reshape back and scale - single operation (only if scaling is enabled)
     decoded = decoded_flat.reshape(batch_size, num_blocks, lattice_dim)
-    result = decoded * beta
+    if disable_scaling:
+        result = decoded
+    else:
+        result = decoded * beta
     
     return result
 
@@ -234,10 +242,11 @@ def optimized_ultra_fast_quantize_cuda(
     inverse_generator_matrix: torch.Tensor,
     eps: torch.Tensor,
     beta: float,
-    q: int
+    q: int,
+    disable_scaling: bool = False
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Optimized ultra-fast CUDA quantization."""
-    return optimized_ultra_fast_quantize_kernel(x, generator_matrix, inverse_generator_matrix, eps, beta, q)
+    return optimized_ultra_fast_quantize_kernel(x, generator_matrix, inverse_generator_matrix, eps, beta, q, disable_scaling)
 
 def optimized_vectorized_encode_decode_cuda(
     x: torch.Tensor,
@@ -245,10 +254,11 @@ def optimized_vectorized_encode_decode_cuda(
     inverse_generator_matrix: torch.Tensor,
     eps: torch.Tensor,
     beta: float,
-    q: int
+    q: int,
+    disable_scaling: bool = False
 ) -> torch.Tensor:
     """Optimized vectorized encode-decode CUDA kernel."""
-    return optimized_vectorized_encode_decode_kernel(x, generator_matrix, inverse_generator_matrix, eps, beta, q)
+    return optimized_vectorized_encode_decode_kernel(x, generator_matrix, inverse_generator_matrix, eps, beta, q, disable_scaling)
 
 # Export the optimized kernels
 __all__ = [

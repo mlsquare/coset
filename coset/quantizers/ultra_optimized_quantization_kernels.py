@@ -115,7 +115,8 @@ def ultra_optimized_quantize_kernel(
     inverse_generator_matrix: torch.Tensor,
     eps: torch.Tensor,
     beta: float,
-    q: int
+    q: int,
+    disable_scaling: bool = False
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Ultra-optimized quantization kernel with minimal memory usage.
@@ -144,8 +145,11 @@ def ultra_optimized_quantize_kernel(
     x_blocks = x_padded.view(batch_size, num_blocks, lattice_dim)
     
     # Streamlined quantization pipeline
-    # 1. Scale and add epsilon in single operation
-    x_scaled = x_blocks / beta + eps.view(1, 1, -1)
+    # 1. Scale and add epsilon in single operation (only if scaling is enabled)
+    if disable_scaling:
+        x_scaled = x_blocks + eps.view(1, 1, -1)
+    else:
+        x_scaled = x_blocks / beta + eps.view(1, 1, -1)
     
     # 2. Flatten for batch processing
     x_flat = x_scaled.reshape(-1, lattice_dim)
@@ -161,8 +165,11 @@ def ultra_optimized_quantize_kernel(
     # 5. Decoding - single matrix multiplication
     decoded_flat = torch.matmul(indices_flat.float(), generator_matrix)
     
-    # 6. Scale and reshape efficiently
-    quantized_flat = decoded_flat * beta
+    # 6. Scale and reshape efficiently (only if scaling is enabled)
+    if disable_scaling:
+        quantized_flat = decoded_flat
+    else:
+        quantized_flat = decoded_flat * beta
     
     # 7. Reshape back and remove padding
     quantized_blocks = quantized_flat.reshape(batch_size, num_blocks, lattice_dim)

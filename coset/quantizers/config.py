@@ -50,6 +50,8 @@ class LatticeConfig:
         max_scaling_iterations: int = 10,
         with_tie_dither: bool = True,
         with_dither: bool = False,
+        disable_scaling: bool = False,
+        disable_overload_protection: bool = False,
     ):
         """
         Initialize lattice configuration.
@@ -66,6 +68,8 @@ class LatticeConfig:
             max_scaling_iterations: Maximum number of scaling iterations
             with_tie_dither: Whether to add tie dither
             with_dither: Whether to add dither for randomized quantization
+            disable_scaling: Whether to disable beta scaling for maximum performance
+            disable_overload_protection: Whether to disable overload protection for maximum performance
         """
         self.type = type
         self.radix = radix
@@ -91,6 +95,8 @@ class LatticeConfig:
         self.max_scaling_iterations = max_scaling_iterations
         self.with_tie_dither = with_tie_dither
         self.with_dither = with_dither
+        self.disable_scaling = disable_scaling
+        self.disable_overload_protection = disable_overload_protection
             
         # Validate configuration
         self._validate_config()
