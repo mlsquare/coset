@@ -22,8 +22,8 @@ This directory contains comprehensive tests and analysis for E8 lattice quantize
 
 ### Run Basic Comparison
 ```bash
-cd matmul_comparisons
-export PYTHONPATH=..:$PYTHONPATH
+cd analysis/matmul_comparisons
+export PYTHONPATH=../..:$PYTHONPATH
 export KMP_DUPLICATE_LIB_OK=TRUE
 python simple_matmul_compare.py
 ```
@@ -121,7 +121,7 @@ python large_norm_matmul_test.py
 
 ## 🔗 Related Files
 
-- `../coset/quantizers/hnlq.py` - Core E8 lattice implementation
-- `../coset/layers/autograd.py` - Quantized matrix multiplication functions
-- `../examples/mlp_example.py` - MLP training example
-- `../tests/test_quantization.py` - Unit tests
+- `../../coset/quantizers/hnlq.py` - Core E8 lattice implementation
+- `../../coset/layers/autograd.py` - Quantized matrix multiplication functions
+- `../../examples/mlp_example.py` - MLP training example
+- `../../tests/test_quantization.py` - Unit tests

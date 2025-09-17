@@ -157,7 +157,7 @@ Decodes from packing representation.
 
 ## Matrix Multiplication Analysis
 
-Matrix multiplication comparison tests and analysis are available in the `matmul_comparisons/` directory:
+Matrix multiplication comparison tests and analysis are available in the `analysis/matmul_comparisons/` directory:
 
 - **Norm Scaling Analysis**: Performance across different matrix norms [1, 4, 16, 64, 256]
 - **Basic Comparisons**: Simplified matrix multiplication tests
@@ -168,7 +168,7 @@ Key findings:
 - **Norm=64 (4³)**: LUT-based outperforms standard quantized (0.998 vs 7.574 relative error)
 - **E8 Lattice**: Handles large norms robustly without numerical issues
 
-See `matmul_comparisons/README.md` for detailed usage instructions and results.
+See `analysis/matmul_comparisons/README.md` for detailed usage instructions and results.
 
 ## License
 
