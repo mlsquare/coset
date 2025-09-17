@@ -1,0 +1,2 @@
+lattice_type,q,M,batch_size,matrix_size,device,cuda_available,quantization_time_ms,throughput_vectors_per_sec,mean_distance,std_distance,min_distance,max_distance,median_distance,q25_distance,q75_distance,q90_distance,q95_distance,q99_distance,num_samples,num_tiles_per_row,lattice_dim
+E8,4,2,1000,512,cuda,True,3.248075023293495,19703978.369041808,0.12122792750597,0.030476044863462448,0.01767808198928833,0.2890009582042694,0.12003062665462494,0.09991904348134995,0.14107008278369904,0.1610899567604065,0.1734243780374527,0.19737835228443146,64000,64,8
