@@ -157,12 +157,11 @@ Decodes from packing representation.
 
 ## Matrix Multiplication Analysis
 
-Comprehensive matrix multiplication comparison tests and analysis are available in the `matmul_comparisons/` directory:
+Matrix multiplication comparison tests and analysis are available in the `matmul_comparisons/` directory:
 
-- **E8 Lattice Performance**: Detailed analysis across different matrix norms and sizes
-- **Scatter Plot Visualizations**: High-resolution plots showing quantization accuracy
-- **Norm Scaling Analysis**: Performance from norm=1 to norm=256 (including 4³=64)
-- **Large Matrix Tests**: Up to 24,576 element matrices (128×256→128×192)
+- **Norm Scaling Analysis**: Performance across different matrix norms [1, 4, 16, 64, 256]
+- **Basic Comparisons**: Simplified matrix multiplication tests
+- **Visualization Results**: High-resolution plots showing quantization accuracy
 
 Key findings:
 - **Norm=1**: Exceptional accuracy (0.028 relative error, 0.9996 correlation)

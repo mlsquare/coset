@@ -7,28 +7,14 @@ This directory contains comprehensive tests and analysis for E8 lattice quantize
 ### Test Scripts
 
 #### Basic Comparisons
-- **`compare_matmul.py`** - Basic matrix multiplication comparison with Z2 lattice
 - **`simple_matmul_compare.py`** - Simplified comparison without plotting dependencies
-- **`e8_matmul_compare.py`** - E8 lattice specific comparison with fallback to Z2
-
-#### Large Matrix Tests
-- **`large_matmul_compare.py`** - Large matrix multiplication test (32×64→32×48)
-- **`large_matmul_summary.py`** - Comprehensive test suite across multiple matrix sizes
 
 #### Norm Scaling Analysis
 - **`large_norm_matmul_test.py`** - Tests across different matrix norms [1, 4, 16, 64, 256]
-- **`norm_1_vs_norm_64_comparison.py`** - Direct comparison between norm=1 and norm=64 (4³)
-- **`norm_64_detailed_test.py`** - Detailed analysis specifically for norm=64 (4³)
 
 ### Generated Visualizations
 
-#### Scatter Plot Analysis
-- **`matmul_comparison.png`** (453KB) - Basic Z2 lattice comparison scatter plots
-- **`large_matmul_comparison.png`** (1.0MB) - Large matrix E8 lattice scatter plots
-- **`norm_1_vs_64_comparison.png`** (1.0MB) - Norm comparison scatter plots (12 panels)
-
 #### Detailed Analysis
-- **`norm_64_detailed_analysis.png`** (1.1MB) - Detailed norm=64 analysis (6 panels)
 - **`norm_scaling_results.png`** (1.2MB) - Norm scaling analysis across [1, 4, 16, 64, 256]
 - **`scaling_analysis.png`** (437KB) - Matrix size scaling behavior
 
@@ -42,24 +28,9 @@ export KMP_DUPLICATE_LIB_OK=TRUE
 python simple_matmul_compare.py
 ```
 
-### Run E8 Lattice Test
-```bash
-python e8_matmul_compare.py
-```
-
-### Run Large Matrix Test
-```bash
-python large_matmul_compare.py
-```
-
 ### Run Norm Scaling Analysis
 ```bash
 python large_norm_matmul_test.py
-```
-
-### Run Norm=1 vs Norm=64 Comparison
-```bash
-python norm_1_vs_norm_64_comparison.py
 ```
 
 ## 📊 Key Findings
