@@ -38,6 +38,24 @@ try:
         verbose=False
     )
     
+    cuda_mac_ext = load(
+        name="cuda_mac",
+        sources=[os.path.join(current_dir, "mac_kernel.cu")],
+        verbose=False
+    )
+    
+    cuda_accumulate_ext = load(
+        name="cuda_accumulate",
+        sources=[os.path.join(current_dir, "accumulate_kernel.cu")],
+        verbose=False
+    )
+    
+    cuda_lut_ext = load(
+        name="cuda_lut",
+        sources=[os.path.join(current_dir, "lut_kernel.cu")],
+        verbose=False
+    )
+    
     CUDA_AVAILABLE = True
     
 except Exception as e:
@@ -46,6 +64,9 @@ except Exception as e:
     cuda_encode_ext = None
     cuda_decode_ext = None
     cuda_quantize_ext = None
+    cuda_mac_ext = None
+    cuda_accumulate_ext = None
+    cuda_lut_ext = None
 
 
 class CudaEncodeFunction(Function):
@@ -271,6 +292,204 @@ def cuda_quantize(x: torch.Tensor, lattice, config) -> torch.Tensor:
         x, lattice.G, lattice.G_inv, config.q, config.M, 
         config.beta, config.alpha, config.max_scaling_iterations
     )
+
+
+# Modulo Arithmetic Autograd Functions
+
+class CudaLUTInnerProductFunction(Function):
+    """Autograd function for CUDA-accelerated LUT inner product."""
+    
+    @staticmethod
+    def forward(ctx, encodings_x, encodings_y, lut, q, d):
+        if not CUDA_AVAILABLE:
+            raise RuntimeError("CUDA kernels not available")
+        
+        # Store for backward pass
+        ctx.save_for_backward(encodings_x, encodings_y, lut)
+        ctx.q = q
+        ctx.d = d
+        
+        # Call CUDA kernel
+        return cuda_mac_ext.cuda_lut_inner_product(encodings_x, encodings_y, lut, q, d)
+    
+    @staticmethod
+    def backward(ctx, grad_output):
+        # Straight-through estimator for gradients
+        return grad_output, None, None, None, None
+
+
+class CudaMACEncodingSpaceFunction(Function):
+    """Autograd function for CUDA-accelerated MAC in encoding space."""
+    
+    @staticmethod
+    def forward(ctx, encodings_x, encodings_y, lut, q, d):
+        if not CUDA_AVAILABLE:
+            raise RuntimeError("CUDA kernels not available")
+        
+        # Store for backward pass
+        ctx.save_for_backward(encodings_x, encodings_y, lut)
+        ctx.q = q
+        ctx.d = d
+        
+        # Call CUDA kernel
+        return cuda_mac_ext.cuda_mac_encoding_space(encodings_x, encodings_y, lut, q, d)
+    
+    @staticmethod
+    def backward(ctx, grad_output):
+        # Straight-through estimator for gradients
+        return grad_output, None, None, None, None
+
+
+class CudaCarryAwareAccumulateFunction(Function):
+    """Autograd function for CUDA-accelerated carry-aware accumulation."""
+    
+    @staticmethod
+    def forward(ctx, encodings, layer_sums, q, d):
+        if not CUDA_AVAILABLE:
+            raise RuntimeError("CUDA kernels not available")
+        
+        # Store for backward pass
+        ctx.save_for_backward(encodings, layer_sums)
+        ctx.q = q
+        ctx.d = d
+        
+        # Call CUDA kernel
+        cuda_accumulate_ext.cuda_carry_aware_accumulate(encodings, layer_sums, q, d)
+        return cuda_accumulate_ext.cuda_normalize_with_carry(layer_sums, q, d)
+    
+    @staticmethod
+    def backward(ctx, grad_output):
+        # Straight-through estimator for gradients
+        return grad_output, None, None, None
+
+
+class CudaBatchMACFunction(Function):
+    """Autograd function for CUDA-accelerated batch MAC operations."""
+    
+    @staticmethod
+    def forward(ctx, encodings_batch_x, encodings_batch_y, lut, q, d):
+        if not CUDA_AVAILABLE:
+            raise RuntimeError("CUDA kernels not available")
+        
+        # Store for backward pass
+        ctx.save_for_backward(encodings_batch_x, encodings_batch_y, lut)
+        ctx.q = q
+        ctx.d = d
+        
+        # Call CUDA kernel
+        return cuda_mac_ext.cuda_batch_mac(encodings_batch_x, encodings_batch_y, lut, q, d)
+    
+    @staticmethod
+    def backward(ctx, grad_output):
+        # Straight-through estimator for gradients
+        return grad_output, None, None, None, None
+
+
+class CudaAdaptiveMACFunction(Function):
+    """Autograd function for CUDA-accelerated adaptive MAC operations."""
+    
+    @staticmethod
+    def forward(ctx, encodings_x, encodings_y, lut, max_layers, q, d):
+        if not CUDA_AVAILABLE:
+            raise RuntimeError("CUDA kernels not available")
+        
+        # Store for backward pass
+        ctx.save_for_backward(encodings_x, encodings_y, lut)
+        ctx.max_layers = max_layers
+        ctx.q = q
+        ctx.d = d
+        
+        # Call CUDA kernel
+        return cuda_mac_ext.cuda_adaptive_mac(encodings_x, encodings_y, lut, max_layers, q, d)
+    
+    @staticmethod
+    def backward(ctx, grad_output):
+        # Straight-through estimator for gradients
+        return grad_output, None, None, None, None, None
+
+
+# High-level CUDA functions for modulo arithmetic
+
+def cuda_lut_inner_product(encodings_x, encodings_y, lut, q, d):
+    """CUDA-accelerated LUT inner product."""
+    if not CUDA_AVAILABLE:
+        raise RuntimeError("CUDA kernels not available")
+    
+    return CudaLUTInnerProductFunction.apply(encodings_x, encodings_y, lut, q, d)
+
+
+def cuda_mac_encoding_space(encodings_x, encodings_y, lut, q, d):
+    """CUDA-accelerated MAC in encoding space."""
+    if not CUDA_AVAILABLE:
+        raise RuntimeError("CUDA kernels not available")
+    
+    return CudaMACEncodingSpaceFunction.apply(encodings_x, encodings_y, lut, q, d)
+
+
+def cuda_carry_aware_accumulate(encodings, layer_sums, q, d):
+    """CUDA-accelerated carry-aware accumulation."""
+    if not CUDA_AVAILABLE:
+        raise RuntimeError("CUDA kernels not available")
+    
+    return CudaCarryAwareAccumulateFunction.apply(encodings, layer_sums, q, d)
+
+
+def cuda_batch_mac(encodings_batch_x, encodings_batch_y, lut, q, d):
+    """CUDA-accelerated batch MAC operations."""
+    if not CUDA_AVAILABLE:
+        raise RuntimeError("CUDA kernels not available")
+    
+    return CudaBatchMACFunction.apply(encodings_batch_x, encodings_batch_y, lut, q, d)
+
+
+def cuda_adaptive_mac(encodings_x, encodings_y, lut, max_layers, q, d):
+    """CUDA-accelerated adaptive MAC operations."""
+    if not CUDA_AVAILABLE:
+        raise RuntimeError("CUDA kernels not available")
+    
+    return CudaAdaptiveMACFunction.apply(encodings_x, encodings_y, lut, max_layers, q, d)
+
+
+# LUT management functions
+
+def cuda_build_lut(lattice_points, lut_size, d):
+    """CUDA-accelerated LUT building."""
+    if not CUDA_AVAILABLE:
+        raise RuntimeError("CUDA kernels not available")
+    
+    return cuda_lut_ext.cuda_build_lut(lattice_points, lut_size, d)
+
+
+def cuda_build_one_sided_lut(query_vector, lattice_points, lut_size, d):
+    """CUDA-accelerated one-sided LUT building."""
+    if not CUDA_AVAILABLE:
+        raise RuntimeError("CUDA kernels not available")
+    
+    return cuda_lut_ext.cuda_build_one_sided_lut(query_vector, lattice_points, lut_size, d)
+
+
+def cuda_lut_lookup(indices_x, indices_y, lut):
+    """CUDA-accelerated LUT lookup."""
+    if not CUDA_AVAILABLE:
+        raise RuntimeError("CUDA kernels not available")
+    
+    return cuda_lut_ext.cuda_lut_lookup(indices_x, indices_y, lut)
+
+
+def cuda_one_sided_lut_lookup(indices, lut):
+    """CUDA-accelerated one-sided LUT lookup."""
+    if not CUDA_AVAILABLE:
+        raise RuntimeError("CUDA kernels not available")
+    
+    return cuda_lut_ext.cuda_one_sided_lut_lookup(indices, lut)
+
+
+def cuda_batch_lut_lookup(indices_batch_x, indices_batch_y, lut, M, q):
+    """CUDA-accelerated batch LUT lookup."""
+    if not CUDA_AVAILABLE:
+        raise RuntimeError("CUDA kernels not available")
+    
+    return cuda_lut_ext.cuda_batch_lut_lookup(indices_batch_x, indices_batch_y, lut, M, q)
 
 
 # Check CUDA availability

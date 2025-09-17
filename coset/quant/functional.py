@@ -6,7 +6,7 @@ as specified in the paper by Kaplan & Ordentlich (2025).
 """
 
 import warnings
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
 import torch
 from .params import QuantizationConfig
 from ..lattices import Lattice
@@ -185,7 +185,8 @@ def mac_modq(x: torch.Tensor, y: torch.Tensor, q: int) -> torch.Tensor:
     """
     Modular multiply-accumulate: <x,y> mod q.
     
-    Compute the inner product of two vectors modulo q.
+    DEPRECATED: This function is kept for backward compatibility but is incorrect
+    for HNLQ operations. Use mac_encoding_space() instead for proper encoding-space MAC.
     
     Args:
         x: First vector
@@ -202,7 +203,8 @@ def accumulate_modq(acc: torch.Tensor, x: torch.Tensor, q: int) -> torch.Tensor:
     """
     Modular accumulation: (acc + x) mod q.
     
-    Add x to accumulator modulo q.
+    DEPRECATED: This function is kept for backward compatibility but is incorrect
+    for HNLQ operations. Use accumulate_encoding_space() instead for proper encoding-space A&A.
     
     Args:
         acc: Accumulator tensor
@@ -213,6 +215,47 @@ def accumulate_modq(acc: torch.Tensor, x: torch.Tensor, q: int) -> torch.Tensor:
         Updated accumulator modulo q
     """
     return (acc + x) % q
+
+
+def mac_encoding_space(encodings_x: List[torch.Tensor], encodings_y: List[torch.Tensor], 
+                      lattice: Lattice, config: QuantizationConfig) -> torch.Tensor:
+    """
+    MAC operation in encoding space using LUT-based operations.
+    
+    This is the correct implementation for HNLQ MAC operations that works
+    entirely in the encoding domain without decoding.
+    
+    Args:
+        encodings_x: List of M encoding tensors for x
+        encodings_y: List of M encoding tensors for y
+        lattice: Lattice instance
+        config: Quantization configuration
+        
+    Returns:
+        MAC results
+    """
+    from .modulo import mac_encoding_space as _mac_encoding_space
+    return _mac_encoding_space(encodings_x, encodings_y, lattice, config)
+
+
+def accumulate_encoding_space(encodings: List[torch.Tensor], 
+                             lattice: Lattice, config: QuantizationConfig) -> List[torch.Tensor]:
+    """
+    A&A operation in encoding space using carry-aware accumulation.
+    
+    This is the correct implementation for HNLQ A&A operations that works
+    entirely in the encoding domain without decoding.
+    
+    Args:
+        encodings: List of M encoding tensors
+        lattice: Lattice instance
+        config: Quantization configuration
+        
+    Returns:
+        Accumulated encodings
+    """
+    from .modulo import accumulate_encoding_space as _accumulate_encoding_space
+    return _accumulate_encoding_space(encodings, lattice, config)
 
 
 def batch_encode(

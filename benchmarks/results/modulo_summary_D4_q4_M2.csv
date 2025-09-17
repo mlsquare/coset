@@ -1,0 +1,5 @@
+Operation,Batch Size,PyTorch Time (s),CUDA Time (s),PyTorch Throughput (ops/s),CUDA Throughput (ops/s),Speedup
+MAC,10,0.465043,0.462709,22,22,1.01
+MAC,50,0.471797,0.476281,106,105,0.99
+A&A,10,0.000126,0.000060,79438,167549,2.11
+A&A,50,0.000064,0.000058,785450,854817,1.09
