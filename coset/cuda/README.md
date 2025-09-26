@@ -4,17 +4,28 @@ This directory contains the optimized CUDA kernels for Value Lookup Table (vLUT)
 
 ## 🚀 Performance Results
 
-Our optimized kernels achieve **2.24x average speedup** over PyTorch native operations, with up to **5.09x speedup** for large-scale matrix operations.
+### One-Sided vLUT Operations
+Our optimized one-sided kernels achieve **2.24x average speedup** over PyTorch native operations, with up to **5.09x speedup** for large-scale matrix operations.
 
-### Key Performance Metrics:
+**Key Performance Metrics:**
 - **Dot Products**: Up to 1.31x faster than PyTorch
 - **Batch Operations**: Up to 4.99x faster than PyTorch  
 - **Matrix Multiplication**: Up to 5.09x faster than PyTorch
 - **Throughput**: Up to 26+ billion operations/second
 
+### Two-Sided vLUT Operations
+Our optimized two-sided kernels achieve even higher performance with dual quantization:
+
+**Key Performance Metrics:**
+- **Dot Products**: Up to 1.72x faster than PyTorch
+- **Batch Operations**: Up to 80+ billion operations/second
+- **Matrix Multiplication**: Up to 88+ billion operations/second
+- **vLUT Construction**: 644+ million operations/second
+- **MAC Operations**: 1.8+ billion operations/second
+
 ## 📁 Files
 
-### Core Implementation
+### One-Sided vLUT Implementation
 - **`optimized_vlut_kernels_v2.cu`** - Optimized CUDA kernels with vectorized operations
   - Vectorized encoding-to-index conversion
   - Larger thread blocks (32x32 vs 16x16)
@@ -22,12 +33,25 @@ Our optimized kernels achieve **2.24x average speedup** over PyTorch native oper
   - Optimized memory access patterns
   - Fused operations for better performance
 
-### Testing & Benchmarking
-- **`test_optimized_kernels_v2.py`** - Basic functionality tests for optimized kernels
+- **`test_optimized_kernels_v2.py`** - Basic functionality tests for one-sided kernels
 - **`test_large_scale_optimized_v2.py`** - Large-scale performance tests with PyTorch comparison
 
+### Two-Sided vLUT Implementation
+- **`optimized_two_sided_vlut_kernels.cu`** - Optimized CUDA kernels for two-sided operations
+  - Dual encoding optimization for both input and query
+  - 2D grid parallelism for batch × query dimensions
+  - Shared memory caching for vLUTs
+  - Enhanced memory layout optimization
+  - Fused operations for better performance
+
+- **`two_sided_vlut_operations.py`** - Python wrapper for two-sided vLUT operations
+- **`two_sided_vlut_neural_layers.py`** - Neural network layers with two-sided vLUT
+- **`test_two_sided_vlut_kernels.py`** - Basic functionality tests for two-sided kernels
+- **`test_large_scale_two_sided_vlut.py`** - Large-scale performance tests for two-sided operations
+
 ### Documentation
-- **`performance_analysis.md`** - Detailed performance analysis and optimization strategies
+- **`performance_analysis.md`** - Detailed performance analysis for one-sided vLUT
+- **`two_sided_vlut_performance_analysis.md`** - Comprehensive analysis for two-sided vLUT
 - **`README.md`** - This file
 
 ## 🔧 Key Optimizations
@@ -61,16 +85,66 @@ dim3 threads_per_block(32, 32);
 
 ## 🧪 Usage
 
-### Basic Test
+### One-Sided vLUT Operations
+
+#### Basic Test
 ```bash
 cd coset/cuda
 python3 test_optimized_kernels_v2.py
 ```
 
-### Large-Scale Performance Test
+#### Large-Scale Performance Test
 ```bash
 cd coset/cuda  
 python3 test_large_scale_optimized_v2.py
+```
+
+### Two-Sided vLUT Operations
+
+#### Basic Test
+```bash
+cd coset/cuda
+python3 test_two_sided_vlut_kernels.py
+```
+
+#### Large-Scale Performance Test
+```bash
+cd coset/cuda
+python3 test_large_scale_two_sided_vlut.py
+```
+
+### Python API Usage
+
+#### One-Sided vLUT
+```python
+from test_optimized_kernels_v2 import create_vectorized_vlut_operations
+from coset.lattices.e8 import E8Lattice
+
+# Initialize
+lattice = E8Lattice()
+config = E8Config(q=3, M=2)
+operations = create_vectorized_vlut_operations(lattice, config)
+
+# Use for dot products
+input_encodings = torch.randint(0, 3, (1000, 8))
+query_vector = torch.randn(8)
+results = operations.dot_product(input_encodings, query_vector)
+```
+
+#### Two-Sided vLUT
+```python
+from two_sided_vlut_operations import create_optimized_two_sided_vlut_operations
+from coset.lattices.e8 import E8Lattice
+
+# Initialize
+lattice = E8Lattice()
+config = E8Config(q=3, M=2)
+operations = create_optimized_two_sided_vlut_operations(lattice, config)
+
+# Use for dot products with both sides quantized
+input_encodings = torch.randint(0, 3, (1000, 8))
+query_encodings = torch.randint(0, 3, (100, 8))
+results = operations.dot_product(input_encodings, query_encodings)
 ```
 
 ## 📊 Performance Comparison
