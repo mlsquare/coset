@@ -23,6 +23,15 @@ Our optimized two-sided kernels achieve even higher performance with dual quanti
 - **vLUT Construction**: 644+ million operations/second
 - **MAC Operations**: 1.8+ billion operations/second
 
+### Ultra-Optimized v2 Operations
+Our latest ultra-optimized kernels with advanced features achieve the highest performance:
+
+**Key Performance Metrics:**
+- **Dot Products**: Up to 1.48x faster than PyTorch
+- **Batch Operations**: Up to 332+ billion operations/second
+- **Ultra-Optimized Features**: Shared memory, warp primitives, Tensor Cores
+- **Comprehensive Benchmarking**: All implementations tested and compared
+
 ## 📁 Files
 
 ### One-Sided vLUT Implementation
@@ -48,6 +57,22 @@ Our optimized two-sided kernels achieve even higher performance with dual quanti
 - **`two_sided_vlut_neural_layers.py`** - Neural network layers with two-sided vLUT
 - **`test_two_sided_vlut_kernels.py`** - Basic functionality tests for two-sided kernels
 - **`test_large_scale_two_sided_vlut.py`** - Large-scale performance tests for two-sided operations
+
+### Ultra-Optimized v2 Implementation
+- **`ultra_optimized_vlut_kernels_v2.cu`** - Ultra-optimized CUDA kernels with advanced features
+  - Shared memory optimization for vLUT caching
+  - Warp-level primitives for SIMD exploitation
+  - Tensor Core utilization for mixed-precision operations
+  - Enhanced memory coalescing and access patterns
+  - Fused operations with reduced memory traffic
+
+- **`ultra_optimized_two_sided_vlut_kernels_v2.cu`** - Ultra-optimized two-sided CUDA kernels
+  - All ultra-optimizations applied to two-sided operations
+  - Dual quantization with shared memory caching
+  - 2D grid parallelism with warp-level primitives
+  - Tensor Core utilization for maximum performance
+
+- **`comprehensive_benchmark_v2.py`** - Comprehensive benchmark comparing all implementations
 
 ### Documentation
 - **`performance_analysis.md`** - Detailed performance analysis for one-sided vLUT
@@ -112,6 +137,20 @@ python3 test_two_sided_vlut_kernels.py
 cd coset/cuda
 python3 test_large_scale_two_sided_vlut.py
 ```
+
+### Ultra-Optimized v2 Operations
+
+#### Comprehensive Benchmark Test
+```bash
+cd coset/cuda
+python3 comprehensive_benchmark_v2.py
+```
+
+This test compares all implementations:
+- Original optimized kernels v2
+- Ultra-optimized kernels v2 (shared memory, warp primitives, Tensor Cores)
+- One-sided vs Two-sided operations
+- PyTorch native operations
 
 ### Python API Usage
 
