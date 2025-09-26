@@ -1,16 +1,16 @@
 """
 Lattice Vector Simulation System
 
-This module provides tools for simulating vectors from a given lattice with specified
-quantization parameters (q, M). It samples encodings, decodes them to generate vectors,
-and validates quantizer performance.
+This module provides tools for generating vectors in the quantized space for a given
+lattice with specified quantization parameters (q, M). It generates vectors that are
+guaranteed to be in the quantized space and validates quantizer performance.
 
 Key Features:
-- Sample encodings from lattice encoding space
-- Decode encodings to generate test vectors
-- Validate exact reconstruction for quantized inputs
+- Generate vectors in the quantized space (zero quantization error)
+- Validate zero quantization error for simulated vectors
 - Assess quantizer performance on generated datasets
 - Generate matrices of specified dimensions
+- Support multiple lattice types (Z2, D4, E8)
 """
 
 import torch
@@ -23,18 +23,18 @@ from pathlib import Path
 # Import lattice and quantization components
 from coset.lattices import Z2Lattice, D4Lattice, E8Lattice
 from coset.quant.params import QuantizationConfig
-from coset.quant.functional import encode, decode, quantize
+from coset.quant.functional import quantize
 
 
 class LatticeVectorSimulator:
     """
-    Simulator for generating vectors from lattice encodings.
+    Simulator for generating vectors in the quantized space.
     
     This class provides methods to:
-    1. Sample encodings from the lattice's encoding space
-    2. Decode encodings to generate test vectors
-    3. Validate exact reconstruction for quantized inputs
-    4. Assess quantizer performance on generated datasets
+    1. Generate vectors that are guaranteed to be in the quantized space
+    2. Validate zero quantization error for simulated vectors
+    3. Assess quantizer performance on generated datasets
+    4. Generate matrices of specified dimensions
     """
     
     def __init__(self, lattice_type: str = "E8", q: int = 3, M: int = 2, 
@@ -89,60 +89,8 @@ class LatticeVectorSimulator:
         print(f"  Configuration: No overloading (t_values=0, scaling disabled)")
         print(f"  Device: {self.device}")
     
-    def sample_encodings(self, batch_size: int, 
-                        t_values: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Sample random encodings from the lattice's encoding space.
-        
-        Args:
-            batch_size: Number of encodings to sample
-            t_values: Optional scaling counts (if None, set to zero - no overloading)
-            
-        Returns:
-            Tuple of (encodings, t_values) where:
-            - encodings: [batch_size, M, d] tensor of encoding values
-            - t_values: [batch_size] tensor of scaling counts (all zeros)
-        """
-        # Sample encodings from {0, 1, ..., q-1}
-        encodings = torch.randint(0, self.q, (batch_size, self.M, self.lattice.d), 
-                                 device=self.device, dtype=torch.int32)
-        
-        # Set t_values to zero (no overloading)
-        if t_values is None:
-            t_values = torch.zeros(batch_size, device=self.device, dtype=torch.int32)
-        else:
-            t_values = t_values.to(self.device)
-        
-        return encodings, t_values
     
-    def decode_encodings(self, encodings: torch.Tensor, t_values: torch.Tensor) -> torch.Tensor:
-        """
-        Decode encodings to generate reconstructed vectors.
-        
-        Args:
-            encodings: [batch_size, M, d] tensor of encoding values
-            t_values: [batch_size] tensor of scaling counts
-            
-        Returns:
-            [batch_size, d] tensor of reconstructed vectors
-        """
-        batch_size = encodings.shape[0]
-        vectors = torch.zeros((batch_size, self.lattice.d), device=self.device, dtype=torch.float32)
-        
-        # Decode each vector
-        for i in range(batch_size):
-            try:
-                vector = decode(encodings[i], self.lattice, self.config, t_values[i])
-                vectors[i] = vector
-            except Exception as e:
-                print(f"Warning: Failed to decode vector {i}: {e}")
-                # Use zero vector as fallback
-                vectors[i] = torch.zeros(self.lattice.d, device=self.device, dtype=torch.float32)
-        
-        return vectors
-    
-    def generate_vectors(self, batch_size: int, 
-                        t_values: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def generate_vectors(self, batch_size: int) -> torch.Tensor:
         """
         Generate vectors that are guaranteed to be in the quantized space.
         
@@ -150,7 +98,6 @@ class LatticeVectorSimulator:
         
         Args:
             batch_size: Number of vectors to generate
-            t_values: Optional scaling counts (ignored, using quantize approach)
             
         Returns:
             [batch_size, d] tensor of generated vectors (in quantized space)
@@ -174,40 +121,17 @@ class LatticeVectorSimulator:
         
         return quantized_vectors
     
-    def generate_vectors_from_encodings(self, batch_size: int, 
-                                      t_values: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """
-        Generate vectors by sampling encodings and decoding them.
-        
-        This method samples random encodings and decodes them to generate vectors.
-        These vectors may not be in the quantized space and may have non-zero
-        quantization error when quantized again.
-        
-        Args:
-            batch_size: Number of vectors to generate
-            t_values: Optional scaling counts
-            
-        Returns:
-            [batch_size, d] tensor of generated vectors (from encodings)
-        """
-        # Sample encodings
-        encodings, t_values = self.sample_encodings(batch_size, t_values)
-        
-        # Decode to get vectors
-        vectors = self.decode_encodings(encodings, t_values)
-        
-        return vectors
     
     def validate_reconstruction(self, simulated_vectors: torch.Tensor, 
                               tolerance: float = 1e-6) -> Dict[str, float]:
         """
-        Validate that simulated vectors (from encodings) have zero quantization error.
+        Validate that simulated vectors have zero quantization error.
         
         Simulated vectors are already in the quantized space, so when quantized again,
         they should have zero error (perfect reconstruction).
         
         Args:
-            simulated_vectors: [batch_size, d] tensor of simulated vectors (from encodings)
+            simulated_vectors: [batch_size, d] tensor of simulated vectors
             tolerance: Numerical tolerance for exact reconstruction
             
         Returns:
