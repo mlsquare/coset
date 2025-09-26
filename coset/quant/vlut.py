@@ -53,8 +53,8 @@ class vLUTManager:
         # Generate all possible encodings
         all_encodings = self._generate_all_encodings()
         
-        # Decode to actual lattice points
-        lattice_points = self._decode_encodings_to_lattice_points(all_encodings)
+        # Decode to actual lattice points and move to device
+        lattice_points = self._decode_encodings_to_lattice_points(all_encodings).to(device)
         
         # Build vLUT: vLUT[i,j] = ⟨lattice_point_i, lattice_point_j⟩
         lut_size = self.q ** self.d
@@ -86,15 +86,16 @@ class vLUTManager:
             device = torch.device('cpu')
             
         # Create cache key
-        query_key = f"{query_vector.sum().item():.6f}_{query_vector.shape}"
+        query_key = f"{query_vector.sum().item():.6f}_{query_vector.shape}_{device}"
         if query_key in self._one_sided_vluts and self._one_sided_vluts[query_key].device == device:
             return self._one_sided_vluts[query_key]
             
         # Generate all possible encodings
         all_encodings = self._generate_all_encodings()
         
-        # Decode to actual lattice points
-        lattice_points = self._decode_encodings_to_lattice_points(all_encodings)
+        # Decode to actual lattice points and move to device
+        lattice_points = self._decode_encodings_to_lattice_points(all_encodings).to(device)
+        query_vector = query_vector.to(device)
         
         # Build vLUT: vLUT[i] = ⟨query_vector, lattice_point_i⟩
         lut_size = self.q ** self.d
@@ -225,7 +226,7 @@ def _encoding_to_index(encoding: torch.Tensor, q: int) -> torch.Tensor:
     # Vectorized index computation
     indices = torch.sum(encoding * powers, dim=1)
     
-    return indices
+    return indices.long()
 
 
 def vlut_mac_operation(encodings_x: List[torch.Tensor], encodings_y: List[torch.Tensor], 
