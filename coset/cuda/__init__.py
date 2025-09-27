@@ -5,20 +5,7 @@ This module provides CUDA-accelerated implementations of the core quantization
 operations: encoding, decoding, and combined quantization.
 """
 
-from .kernels import (
-    cuda_encode,
-    cuda_decode, 
-    cuda_quantize,
-    CudaEncodeFunction,
-    CudaDecodeFunction,
-    CudaQuantizeFunction
-)
+# Note: Individual vLUT implementations are imported directly from their respective modules
+# to avoid circular import issues.
 
-__all__ = [
-    'cuda_encode',
-    'cuda_decode',
-    'cuda_quantize', 
-    'CudaEncodeFunction',
-    'CudaDecodeFunction',
-    'CudaQuantizeFunction'
-]
+__all__ = []

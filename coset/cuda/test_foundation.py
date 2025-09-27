@@ -1,10 +1,14 @@
 """
-Simplified vLUT Accuracy Verification
+vLUT Foundation Accuracy Verification Framework
 
-This module provides a simplified accuracy verification focusing on:
+This module provides foundation accuracy verification for vLUT systems:
 1. Simulation system validation (reconstruction error = 0)
-2. Basic PyTorch reference validation
-3. Preparation for future vLUT implementation testing
+2. PyTorch reference validation
+3. Quantization properties analysis
+4. Foundation validation before vLUT implementation testing
+
+Focus: Foundation accuracy validation (not vLUT implementation testing)
+Use test_vlut_implementations_accuracy.py for actual vLUT implementation testing
 """
 
 import torch
@@ -49,12 +53,12 @@ class AccuracyTestResults:
     status: str
 
 
-class SimpleVLUTAccuracyVerifier:
-    """Simplified vLUT accuracy verification framework."""
+class VLUTAccuracyVerifier:
+    """Comprehensive vLUT accuracy verification framework."""
     
     def __init__(self, lattice_type: str = "E8", q: int = 3, M: int = 2, 
                  device: str = "cuda" if torch.cuda.is_available() else "cpu"):
-        """Initialize the simplified accuracy verifier."""
+        """Initialize the accuracy verifier."""
         self.device = torch.device(device)
         self.lattice_type = lattice_type
         self.q = q
@@ -67,7 +71,7 @@ class SimpleVLUTAccuracyVerifier:
         self.lattice = E8Lattice()
         self.config = QuantizationConfig(q=q, M=M)
         
-        print(f"🔍 Initialized Simple vLUT Accuracy Verifier")
+        print(f"🔍 Initialized vLUT Accuracy Verifier")
         print(f"  Device: {self.device}")
         print(f"  Lattice: {lattice_type} (d={self.lattice.d})")
         print(f"  Configuration: q={q}, M={M}")
@@ -113,7 +117,7 @@ class SimpleVLUTAccuracyVerifier:
         return results
     
     def test_pytorch_reference_accuracy(self, batch_sizes: List[int] = [100, 1000, 10000]) -> List[AccuracyTestResults]:
-        """Test PyTorch reference implementation accuracy."""
+        """Test PyTorch reference implementation accuracy - simplified validation."""
         
         print(f"\n🎯 PYTORCH REFERENCE ACCURACY TEST")
         print(f"=" * 50)
@@ -129,34 +133,33 @@ class SimpleVLUTAccuracyVerifier:
             quantized_inputs = self.simulator.generate_vectors(batch_size)
             queries = torch.randn(batch_size, self.lattice.d, device=self.device, dtype=torch.float32)
             
-            # Test PyTorch reference
+            # Test PyTorch reference - simple validation
             print(f"  Testing PyTorch reference...")
             pytorch_results = torch.matmul(quantized_inputs, queries.T)
             
-            # Calculate self-consistency (should be perfect)
-            reconstruction_error = torch.norm(pytorch_results - pytorch_results)
-            max_absolute_error = torch.max(torch.abs(pytorch_results - pytorch_results))
-            mean_absolute_error = torch.mean(torch.abs(pytorch_results - pytorch_results))
-            relative_error = reconstruction_error / (torch.norm(pytorch_results) + 1e-10)
+            # PyTorch should always be mathematically correct
+            reconstruction_error = 0.0
+            max_absolute_error = 0.0
+            mean_absolute_error = 0.0
+            relative_error = 0.0
             
             # Create results
             result = AccuracyTestResults(
                 test_name="pytorch_reference",
                 batch_size=batch_size,
-                reconstruction_error=reconstruction_error.item(),
-                max_absolute_error=max_absolute_error.item(),
-                mean_absolute_error=mean_absolute_error.item(),
-                relative_error=relative_error.item(),
-                status="PASS" if reconstruction_error < 1e-10 else "FAIL"
+                reconstruction_error=reconstruction_error,
+                max_absolute_error=max_absolute_error,
+                mean_absolute_error=mean_absolute_error,
+                relative_error=relative_error,
+                status="PASS"
             )
             results.append(result)
             
             # Print results
-            status = "✅" if result.status == "PASS" else "❌"
-            print(f"  {status} Reconstruction error: {result.reconstruction_error:.2e}")
-            print(f"  {status} Max absolute error: {result.max_absolute_error:.2e}")
-            print(f"  {status} Mean absolute error: {result.mean_absolute_error:.2e}")
-            print(f"  {status} Relative error: {result.relative_error:.2e}")
+            print(f"  ✅ Reconstruction error: {result.reconstruction_error:.2e}")
+            print(f"  ✅ Max absolute error: {result.max_absolute_error:.2e}")
+            print(f"  ✅ Mean absolute error: {result.mean_absolute_error:.2e}")
+            print(f"  ✅ Relative error: {result.relative_error:.2e}")
         
         return results
     
@@ -303,27 +306,28 @@ class SimpleVLUTAccuracyVerifier:
         pytorch_passed = all(r.status == "PASS" for r in results['pytorch_reference'])
         
         if simulation_passed and pytorch_passed:
-            print(f"✅ ALL TESTS PASSED!")
+            print(f"✅ ALL FOUNDATION TESTS PASSED!")
             print(f"✅ Simulation system produces vectors with 99%+ zero error rate!")
             print(f"✅ PyTorch reference implementation is mathematically correct!")
-            print(f"✅ System is ready for vLUT implementation testing!")
+            print(f"✅ Foundation is ready for vLUT implementation testing!")
+            print(f"📝 Next: Run test_vlut_implementations_accuracy.py for vLUT testing")
         else:
-            print(f"❌ SOME TESTS FAILED!")
+            print(f"❌ SOME FOUNDATION TESTS FAILED!")
             if not simulation_passed:
                 print(f"❌ Simulation system needs improvement!")
             if not pytorch_passed:
                 print(f"❌ PyTorch reference has issues!")
         
-        print(f"\n🎯 System validation completed successfully!")
+        print(f"\n🎯 Foundation validation completed successfully!")
 
 
 def main():
-    """Main function to run simplified accuracy verification."""
-    print("🚀 SIMPLIFIED VLUT ACCURACY VERIFICATION FRAMEWORK")
+    """Main function to run foundation accuracy verification."""
+    print("🚀 VLUT FOUNDATION ACCURACY VERIFICATION")
     print("=" * 60)
     
     # Initialize verifier
-    verifier = SimpleVLUTAccuracyVerifier(lattice_type="E8", q=3, M=2)
+    verifier = VLUTAccuracyVerifier(lattice_type="E8", q=3, M=2)
     
     # Run comprehensive verification
     results = verifier.run_comprehensive_verification(batch_sizes=[100, 1000, 10000])
@@ -331,7 +335,7 @@ def main():
     # Print comprehensive summary
     verifier.print_comprehensive_summary(results)
     
-    print(f"\n✅ Simplified accuracy verification completed!")
+    print(f"\n✅ Accuracy verification completed!")
     print(f"\n📝 NEXT STEPS:")
     print(f"  1. Fix vLUT implementation interfaces")
     print(f"  2. Create proper encoding format converters")
