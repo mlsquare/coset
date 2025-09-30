@@ -73,7 +73,9 @@ class vLUTManager:
         """
         Build one-sided vLUT containing scalar values of inner products with query.
         
-        vLUT[i] = ⟨query_vector, lattice_point_i⟩
+        For HNLQ residual-based quantization:
+        vLUT[i] = ⟨query_vector, residual_i⟩
+        where residual_i = (b_i @ G) - q·Q((b_i @ G)/q)
         
         Args:
             query_vector: Query vector of shape (d,)
@@ -97,13 +99,18 @@ class vLUTManager:
         lattice_points = self._decode_encodings_to_lattice_points(all_encodings).to(device)
         query_vector = query_vector.to(device)
         
-        # Build vLUT: vLUT[i] = ⟨query_vector, lattice_point_i⟩
+        # Build vLUT with residuals: vLUT[i] = ⟨query_vector, residual_i⟩
+        # residual_i = lattice_point_i - q * Q(lattice_point_i / q)
         lut_size = self.q ** self.d
         vlut = torch.zeros(lut_size, dtype=torch.float32, device=device)
         
         for i in range(lut_size):
-            # Compute inner product
-            inner_product = torch.dot(query_vector, lattice_points[i])
+            # Compute residual: x_i = Gb_i - q * Q(Gb_i / q)
+            Gb_i = lattice_points[i]
+            residual_i = Gb_i - self.q * self.lattice.Q(Gb_i / self.q)
+            
+            # Compute inner product with residual
+            inner_product = torch.dot(query_vector, residual_i)
             vlut[i] = inner_product
                 
         self._one_sided_vluts[query_key] = vlut
@@ -141,8 +148,10 @@ class vLUTManager:
             Tensor of shape (q^d, d) containing actual lattice points
         """
         # Convert encodings to lattice points using generator matrix
-        # lattice_point = encoding @ G
-        lattice_points = encodings.float() @ self.lattice.G
+        # lattice_point = G @ encoding (matching decode_coords implementation)
+        # For batch: lattice_points[i] = G @ encodings[i] => (encodings @ G.T).T = G @ encodings.T
+        # But we want shape (q^d, d), so we use: (G @ encodings.T).T = encodings @ G.T
+        lattice_points = encodings.float() @ self.lattice.G.T
         
         return lattice_points
     
