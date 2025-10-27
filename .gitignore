@@ -128,14 +128,81 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# PyTorch
+# PyTorch / Machine Learning Models
 *.pth
 *.pt
+*.pkl
+*.pickle
+*.joblib
+*.model
+*.weights
+*.ckpt
+*.checkpoint
+*.safetensors
+*.bin
+*.safetensors
 
-# Data files
+# Data files and datasets
 data/
+datasets/
 *.h5
 *.hdf5
+*.csv
+*.tsv
+*.json
+*.jsonl
+*.parquet
+*.feather
+*.arrow
+*.npy
+*.npz
+*.mat
+*.wav
+*.mp3
+*.mp4
+*.avi
+*.mov
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.tiff
+*.tif
+*.svg
+*.pdf
+*.zip
+*.tar
+*.tar.gz
+*.rar
+*.7z
+
+# Model checkpoints and training artifacts
+checkpoints/
+models/
+saved_models/
+trained_models/
+outputs/
+logs/
+runs/
+wandb/
+tensorboard/
+lightning_logs/
+mlruns/
+
+# Jupyter notebook outputs
+*.ipynb_checkpoints/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+*.orig
+*.rej
+*.swp
+*.swo
+*~
 
 # IDE
 .vscode/
