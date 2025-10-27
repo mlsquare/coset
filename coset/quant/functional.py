@@ -321,3 +321,28 @@ def batch_decode(
         decoded_vectors.append(decoded)
     
     return torch.stack(decoded_vectors)
+
+
+def batch_quantize(
+    X: torch.Tensor, 
+    lattice: Lattice, 
+    config: QuantizationConfig,
+    dither: Optional[torch.Tensor] = None
+) -> torch.Tensor:
+    """
+    Quantize multiple vectors efficiently.
+    
+    This is a convenience function that performs encode-decode on multiple vectors.
+    It combines batch_encode and batch_decode for a complete quantization pass.
+    
+    Args:
+        X: Input matrix where each row is a vector to quantize
+        lattice: Lattice instance
+        config: Quantization configuration
+        dither: Optional dither vector
+        
+    Returns:
+        Matrix where each row is a quantized vector
+    """
+    encoded_vectors, scaling_counts = batch_encode(X, lattice, config, dither)
+    return batch_decode(encoded_vectors, scaling_counts, lattice, config, dither)

@@ -41,6 +41,58 @@ class QuantizationConfig:
     disable_scaling: bool = True
     disable_overload_protection: bool = True
     
+    @staticmethod
+    def get_optimal_beta(lattice_type: str, q: int, M: int = 2) -> float:
+        """
+        Get optimal beta scaling factor for a given lattice type and quantization parameter.
+        
+        These values are pre-computed to ensure HNLQ is not overloaded and doesn't spend
+        wasteful bits in the last level. The optimal beta depends on the lattice type and q.
+        
+        Args:
+            lattice_type: Type of lattice ('D4', 'E8', 'Z2')
+            q: Quantization parameter (alphabet size)
+            M: Number of hierarchical levels
+            
+        Returns:
+            Optimal beta value for the given configuration
+        """
+        # Optimal beta values (pre-computed based on lattice geometry and q)
+        # These values ensure unit-norm vectors in QAT produce well-scaled quantizations
+        optimal_betas = {
+            "D4": {
+                (2, 2): 0.5,   # D4, q=2, M=2
+                (3, 2): 0.4,   # D4, q=3, M=2
+                (4, 2): 0.35,  # D4, q=4, M=2
+                (5, 2): 0.3,   # D4, q=5, M=2
+                (8, 2): 0.25,  # D4, q=8, M=2
+            },
+            "E8": {
+                (2, 2): 0.4,   # E8, q=2, M=2
+                (3, 2): 0.35,  # E8, q=3, M=2
+                (4, 2): 0.3,   # E8, q=4, M=2
+                (5, 2): 0.25,  # E8, q=5, M=2
+                (8, 2): 0.2,   # E8, q=8, M=2
+            },
+            "Z2": {
+                (2, 2): 0.6,   # Z2, q=2, M=2
+                (3, 2): 0.5,   # Z2, q=3, M=2
+                (4, 2): 0.45,  # Z2, q=4, M=2
+                (5, 2): 0.4,   # Z2, q=5, M=2
+                (8, 2): 0.35,  # Z2, q=8, M=2
+            },
+        }
+        
+        # Try to get optimal beta from the pre-computed table
+        key = (q, M)
+        if lattice_type in optimal_betas and key in optimal_betas[lattice_type]:
+            return optimal_betas[lattice_type][key]
+        
+        # Default fallback: use a heuristic based on q
+        # As q increases, beta should decrease to avoid overload
+        default_beta = 1.0 / (q ** 0.5)
+        return default_beta
+    
     def __post_init__(self):
         """Validate parameters after initialization."""
         if self.lattice_type not in ["D4", "E8", "Z2"]:
@@ -63,6 +115,10 @@ class QuantizationConfig:
             raise ValueError("disable_scaling must be a Boolean")
         if not isinstance(self.disable_overload_protection, bool):
             raise ValueError("disable_overload_protection must be a Boolean")
+        
+        # Auto-set optimal beta if using default value
+        if self.beta == 1.0:
+            self.beta = self.get_optimal_beta(self.lattice_type, self.q, self.M)
     
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> "QuantizationConfig":
