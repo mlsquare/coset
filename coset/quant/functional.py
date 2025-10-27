@@ -291,34 +291,8 @@ def batch_encode(
     
     batch_size = X.shape[0]
     
-    # If overload protection is disabled, we can use vmap for efficient vectorization
-    # Otherwise, we need to fall back to a loop because of the while loop in encode
-    if config.disable_overload_protection:
-        try:
-            from torch.func import vmap
-            
-            def encode_single(x_vec):
-                """Wrapper for encode that returns tuple properly, skipping overload check."""
-                # Call _encode_internal directly with check_overload=False for better performance
-                x_scaled = x_vec / config.beta
-            
-                if config.with_dither and dither is not None:
-                    x_scaled = x_scaled + dither.flatten()
-                
-                # Encode without overload check for maximum performance
-                encoding_vectors, _ = _encode_internal(x_scaled, lattice, config, check_overload=False)
-                # Always return T=0 since we skip overload handling
-                return encoding_vectors, torch.tensor(0, dtype=torch.int64)
-            
-            # Use vmap to vectorize over the batch dimension
-            encoded_vectors, scaling_counts = vmap(encode_single)(X)
-            return encoded_vectors, scaling_counts
-        except (ImportError, NotImplementedError):
-            # Fall back to loop if vmap is not available
-            pass
-    
-    # Fallback: loop-based implementation
-    # Pre-allocate tensors for better performance
+    # Loop-based implementation
+    # Note: vmap is not used because lattice operations (torch.argmax, indexing) are incompatible
     encoded_vectors = []
     scaling_counts = []
     
@@ -354,28 +328,8 @@ def batch_decode(
     """
     batch_size = encoded_vectors.shape[0]
     
-    # Try to use vmap for efficient vectorization
-    # Note: This is disabled by default because vmap has issues with .item() calls
-    # in the decode function. Keeping the code structure but not attempting to use vmap.
-    use_vmap = False  # Disable vmap due to .item() incompatibility
-    
-    if use_vmap:
-        try:
-            from torch.func import vmap
-            
-            def decode_single(b_encoded, t_scalar):
-                """Wrapper for decode."""
-                return decode(b_encoded, lattice, config, t_scalar, dither)
-            
-            # Use vmap to vectorize over the batch dimension
-            scaling_counts_numeric = scaling_counts if isinstance(scaling_counts, torch.Tensor) else torch.tensor(scaling_counts)
-            decoded_vectors = vmap(decode_single)(encoded_vectors, scaling_counts_numeric)
-            return decoded_vectors
-        except (ImportError, NotImplementedError):
-            # Fall back to loop if vmap is not available
-            pass
-    
-    # Fallback: loop-based implementation
+    # Loop-based implementation
+    # Note: vmap is not used due to .item() calls and lattice operation incompatibilities
     decoded_vectors = []
     for i in range(batch_size):
         decoded = decode(encoded_vectors[i], lattice, config, scaling_counts[i].item(), dither)
