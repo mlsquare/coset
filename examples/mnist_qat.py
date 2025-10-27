@@ -174,10 +174,12 @@ def main():
         lattice_type="D4",
         q=4,
         M=2,
-        beta=1.0,
+        beta=1.0,  # Will be auto-set to optimal value (0.35 for D4, q=4)
         alpha=1.0,
         with_tie_dither=True,
-        with_dither=False
+        with_dither=False,
+        disable_overload_protection=True,  # Enable faster encoding (1.5x speedup)
+        disable_scaling=True  # Additional optimization
     )
     
     print(f"\nQuantization Config: {config}")
