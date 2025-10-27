@@ -16,7 +16,8 @@ def encode(
     x: torch.Tensor, 
     lattice: Lattice, 
     config: QuantizationConfig,
-    dither: Optional[torch.Tensor] = None
+    dither: Optional[torch.Tensor] = None,
+    device: Optional[torch.device] = None
 ) -> Tuple[torch.Tensor, int]:
     """
     Algorithm 1: Hierarchical encoding.
@@ -29,16 +30,25 @@ def encode(
         lattice: Lattice instance for quantization
         config: Quantization configuration
         dither: Optional dither vector for randomized quantization
+        device: Device to perform computation on (defaults to x's device)
         
     Returns:
         Tuple of (encoding_vectors, T) where:
         - encoding_vectors: Tensor of shape [M, d] containing M encoding vectors
         - T: Number of scaling operations performed to handle overload
     """
-    # Ensure x is a vector
-    x = x.flatten()
+    # Determine device
+    if device is None:
+        device = x.device
+    
+    # Ensure x is on the correct device
+    x = x.to(device).flatten()
     if x.shape[0] != lattice.d:
         raise ValueError(f"Input dimension {x.shape[0]} doesn't match lattice dimension {lattice.d}")
+    
+    # Move dither to correct device
+    if dither is not None:
+        dither = dither.to(device)
     
     # Apply scaling and dithering
     x_scaled = x / config.beta
@@ -111,7 +121,8 @@ def decode(
     lattice: Lattice, 
     config: QuantizationConfig,
     T: int = 0,
-    dither: Optional[torch.Tensor] = None
+    dither: Optional[torch.Tensor] = None,
+    device: Optional[torch.device] = None
 ) -> torch.Tensor:
     """
     Algorithm 2: Hierarchical decoding.
@@ -125,14 +136,26 @@ def decode(
         config: Quantization configuration
         T: Number of scaling operations that were applied during encoding
         dither: Optional dither vector (if used during encoding)
+        device: Device to perform computation on (defaults to b's device)
         
     Returns:
         Reconstructed vector
     """
+    # Determine device
+    if device is None:
+        device = b.device
+    
+    # Ensure b is on the correct device
+    b = b.to(device)
+    
     if b.shape[0] != config.M:
         raise ValueError(f"Number of encoding levels {b.shape[0]} doesn't match M={config.M}")
     if b.shape[1] != lattice.d:
         raise ValueError(f"Encoding dimension {b.shape[1]} doesn't match lattice dimension {lattice.d}")
+    
+    # Move dither to correct device
+    if dither is not None:
+        dither = dither.to(device)
     
     # Perform hierarchical reconstruction
     x_hat_list = []
@@ -165,7 +188,8 @@ def quantize(
     x: torch.Tensor, 
     lattice: Lattice, 
     config: QuantizationConfig,
-    dither: Optional[torch.Tensor] = None
+    dither: Optional[torch.Tensor] = None,
+    device: Optional[torch.device] = None
 ) -> torch.Tensor:
     """
     Complete hierarchical quantization process: encode and decode a vector.
@@ -178,12 +202,13 @@ def quantize(
         lattice: Lattice instance
         config: Quantization configuration
         dither: Optional dither vector for randomized quantization
+        device: Device to perform computation on (defaults to x's device)
         
     Returns:
         Quantized version of the input vector
     """
-    b, T = encode(x, lattice, config, dither)
-    return decode(b, lattice, config, T, dither)
+    b, T = encode(x, lattice, config, dither, device=device)
+    return decode(b, lattice, config, T, dither, device=device)
 
 
 def mac_modq(x: torch.Tensor, y: torch.Tensor, q: int) -> torch.Tensor:
@@ -267,7 +292,8 @@ def batch_encode(
     X: torch.Tensor, 
     lattice: Lattice, 
     config: QuantizationConfig,
-    dither: Optional[torch.Tensor] = None
+    dither: Optional[torch.Tensor] = None,
+    device: Optional[torch.device] = None
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Encode multiple vectors efficiently.
@@ -277,6 +303,7 @@ def batch_encode(
         lattice: Lattice instance
         config: Quantization configuration
         dither: Optional dither vector
+        device: Device to perform computation on (defaults to X's device)
         
     Returns:
         Tuple of (encoded_vectors, scaling_counts) where:
@@ -286,6 +313,13 @@ def batch_encode(
     if X.ndim == 1:
         X = X.reshape(1, -1)
     
+    # Determine device
+    if device is None:
+        device = X.device
+    
+    # Move input to correct device
+    X = X.to(device)
+    
     batch_size = X.shape[0]
     
     # Loop-based implementation (will be replaced with CUDA kernels)
@@ -293,11 +327,11 @@ def batch_encode(
     scaling_counts = []
     
     for i in range(batch_size):
-        b, T = encode(X[i], lattice, config, dither)
+        b, T = encode(X[i], lattice, config, dither, device=device)
         encoded_vectors.append(b)
         scaling_counts.append(T)
     
-    return torch.stack(encoded_vectors), torch.tensor(scaling_counts)
+    return torch.stack(encoded_vectors), torch.tensor(scaling_counts, device=device)
 
 
 def batch_decode(
@@ -305,7 +339,8 @@ def batch_decode(
     scaling_counts: torch.Tensor,
     lattice: Lattice, 
     config: QuantizationConfig,
-    dither: Optional[torch.Tensor] = None
+    dither: Optional[torch.Tensor] = None,
+    device: Optional[torch.device] = None
 ) -> torch.Tensor:
     """
     Decode multiple vectors efficiently.
@@ -316,16 +351,25 @@ def batch_decode(
         lattice: Lattice instance
         config: Quantization configuration
         dither: Optional dither vector
+        device: Device to perform computation on (defaults to encoded_vectors' device)
         
     Returns:
         Matrix where each row is a decoded vector
     """
+    # Determine device
+    if device is None:
+        device = encoded_vectors.device
+    
+    # Move inputs to correct device
+    encoded_vectors = encoded_vectors.to(device)
+    scaling_counts = scaling_counts.to(device)
+    
     batch_size = encoded_vectors.shape[0]
     
     # Loop-based implementation (will be replaced with CUDA kernels)
     decoded_vectors = []
     for i in range(batch_size):
-        decoded = decode(encoded_vectors[i], lattice, config, scaling_counts[i].item(), dither)
+        decoded = decode(encoded_vectors[i], lattice, config, scaling_counts[i].item(), dither, device=device)
         decoded_vectors.append(decoded)
     
     return torch.stack(decoded_vectors)
@@ -335,7 +379,8 @@ def batch_quantize(
     X: torch.Tensor, 
     lattice: Lattice, 
     config: QuantizationConfig,
-    dither: Optional[torch.Tensor] = None
+    dither: Optional[torch.Tensor] = None,
+    device: Optional[torch.device] = None
 ) -> torch.Tensor:
     """
     Quantize multiple vectors efficiently.
@@ -348,9 +393,10 @@ def batch_quantize(
         lattice: Lattice instance
         config: Quantization configuration
         dither: Optional dither vector
+        device: Device to perform computation on (defaults to X's device)
         
     Returns:
         Matrix where each row is a quantized vector
     """
-    encoded_vectors, scaling_counts = batch_encode(X, lattice, config, dither)
-    return batch_decode(encoded_vectors, scaling_counts, lattice, config, dither)
+    encoded_vectors, scaling_counts = batch_encode(X, lattice, config, dither, device=device)
+    return batch_decode(encoded_vectors, scaling_counts, lattice, config, dither, device=device)

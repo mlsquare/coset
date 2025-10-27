@@ -6,6 +6,7 @@ It has excellent packing properties in 4D and is commonly used in lattice quanti
 """
 
 import torch
+from typing import Optional
 from .base import Lattice
 
 
@@ -18,15 +19,20 @@ class D4Lattice(Lattice):
     4D sphere packing.
     """
     
-    def __init__(self):
-        """Initialize the D₄ lattice with its generator matrix."""
+    def __init__(self, device: Optional[torch.device] = None):
+        """
+        Initialize the D₄ lattice with its generator matrix.
+        
+        Args:
+            device: Device to place the generator matrix on
+        """
         G = torch.tensor([
             [-1, -1, 0, 0],
             [1, -1, 0, 0], 
             [0, 1, -1, 0],
             [0, 0, 1, -1]
         ], dtype=torch.float32).T
-        super().__init__(G, "D4")
+        super().__init__(G, "D4", device=device)
     
     def g_x(self, x: torch.Tensor) -> torch.Tensor:
         """

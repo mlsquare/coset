@@ -6,6 +6,7 @@ It is optimal for 8D sphere packing and has many applications in coding theory a
 """
 
 import torch
+from typing import Optional
 from .base import Lattice
 
 
@@ -18,8 +19,13 @@ class E8Lattice(Lattice):
     density in 8D.
     """
     
-    def __init__(self):
-        """Initialize the E₈ lattice with its generator matrix."""
+    def __init__(self, device: Optional[torch.device] = None):
+        """
+        Initialize the E₈ lattice with its generator matrix.
+        
+        Args:
+            device: Device to place the generator matrix on
+        """
         G = torch.tensor([
             [2, 0, 0, 0, 0, 0, 0, 0],
             [-1, 1, 0, 0, 0, 0, 0, 0],
@@ -30,7 +36,7 @@ class E8Lattice(Lattice):
             [0, 0, 0, 0, 0, -1, 1, 0],
             [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5],
         ], dtype=torch.float32).T
-        super().__init__(G, "E8")
+        super().__init__(G, "E8", device=device)
     
     def g_x(self, x: torch.Tensor) -> torch.Tensor:
         """

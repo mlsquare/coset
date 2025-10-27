@@ -6,6 +6,7 @@ implementation for hierarchical nested-lattice quantization.
 """
 
 import torch
+from typing import Optional
 from .base import Lattice
 
 
@@ -17,10 +18,15 @@ class Z2Lattice(Lattice):
     This is the simplest lattice and serves as a baseline for comparison.
     """
     
-    def __init__(self):
-        """Initialize the Z² lattice with identity generator matrix."""
+    def __init__(self, device: Optional[torch.device] = None):
+        """
+        Initialize the Z² lattice with identity generator matrix.
+        
+        Args:
+            device: Device to place the generator matrix on
+        """
         G = torch.eye(2, dtype=torch.float32)
-        super().__init__(G, "Z2")
+        super().__init__(G, "Z2", device=device)
     
     def Q(self, x: torch.Tensor) -> torch.Tensor:
         """

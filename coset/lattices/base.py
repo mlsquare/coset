@@ -25,21 +25,27 @@ class Lattice(ABC):
         d: Dimension of the lattice
     """
     
-    def __init__(self, G: torch.Tensor, name: str):
+    def __init__(self, G: torch.Tensor, name: str, device: Optional[torch.device] = None):
         """
         Initialize the lattice.
         
         Args:
             G: Generator matrix for the lattice
             name: Name of the lattice
+            device: Device to place G and G_inv on (defaults to G's device)
         """
         if G.shape[0] != G.shape[1]:
             raise ValueError("Generator matrix G must be square")
+        
+        # Move G to specified device if given
+        if device is not None:
+            G = G.to(device)
         
         self.G = G
         self.G_inv = torch.linalg.inv(G)
         self.name = name
         self.d = G.shape[0]
+        self.device = G.device
     
     @abstractmethod
     def Q(self, x: torch.Tensor) -> torch.Tensor:
