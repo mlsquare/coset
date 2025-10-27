@@ -97,7 +97,7 @@ def _encode_internal(
         # Scale down for next level
         x_l = x_l / config.q
     
-    # Check for overload (can be skipped for performance when using vmap)
+    # Check for overload
     if check_overload:
         overload_error = not torch.allclose(lattice.Q(x_l), torch.zeros_like(x_l), atol=1e-8)
     else:
@@ -272,9 +272,6 @@ def batch_encode(
     """
     Encode multiple vectors efficiently.
     
-    Uses torch.vmap for automatic vectorization when possible, falling back to
-    a loop for stability when overload protection is enabled.
-    
     Args:
         X: Input matrix where each row is a vector to encode
         lattice: Lattice instance
@@ -291,8 +288,7 @@ def batch_encode(
     
     batch_size = X.shape[0]
     
-    # Loop-based implementation
-    # Note: vmap is not used because lattice operations (torch.argmax, indexing) are incompatible
+    # Loop-based implementation (will be replaced with CUDA kernels)
     encoded_vectors = []
     scaling_counts = []
     
@@ -314,8 +310,6 @@ def batch_decode(
     """
     Decode multiple vectors efficiently.
     
-    Uses torch.vmap for automatic vectorization for better performance.
-    
     Args:
         encoded_vectors: Tensor of shape [batch_size, M, d]
         scaling_counts: Tensor of shape [batch_size]
@@ -328,8 +322,7 @@ def batch_decode(
     """
     batch_size = encoded_vectors.shape[0]
     
-    # Loop-based implementation
-    # Note: vmap is not used due to .item() calls and lattice operation incompatibilities
+    # Loop-based implementation (will be replaced with CUDA kernels)
     decoded_vectors = []
     for i in range(batch_size):
         decoded = decode(encoded_vectors[i], lattice, config, scaling_counts[i].item(), dither)
