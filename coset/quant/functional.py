@@ -301,6 +301,7 @@ def batch_encode(
                 """Wrapper for encode that returns tuple properly, skipping overload check."""
                 # Call _encode_internal directly with check_overload=False for better performance
                 x_scaled = x_vec / config.beta
+            
                 if config.with_dither and dither is not None:
                     x_scaled = x_scaled + dither.flatten()
                 
@@ -354,21 +355,25 @@ def batch_decode(
     batch_size = encoded_vectors.shape[0]
     
     # Try to use vmap for efficient vectorization
-    try:
-        from torch.func import vmap
-        
-        def decode_single(b_encoded, t):
-            """Wrapper for decode."""
-            return decode(b_encoded, lattice, config, t.item() if isinstance(t, torch.Tensor) else t, dither)
-        
-        # Use vmap to vectorize over the batch dimension
-        # scale_counts might be int or tensor, so we need to handle both
-        scaling_counts_numeric = scaling_counts if isinstance(scaling_counts, torch.Tensor) else torch.tensor(scaling_counts)
-        decoded_vectors = vmap(decode_single)(encoded_vectors, scaling_counts_numeric)
-        return decoded_vectors
-    except (ImportError, NotImplementedError):
-        # Fall back to loop if vmap is not available
-        pass
+    # Note: This is disabled by default because vmap has issues with .item() calls
+    # in the decode function. Keeping the code structure but not attempting to use vmap.
+    use_vmap = False  # Disable vmap due to .item() incompatibility
+    
+    if use_vmap:
+        try:
+            from torch.func import vmap
+            
+            def decode_single(b_encoded, t_scalar):
+                """Wrapper for decode."""
+                return decode(b_encoded, lattice, config, t_scalar, dither)
+            
+            # Use vmap to vectorize over the batch dimension
+            scaling_counts_numeric = scaling_counts if isinstance(scaling_counts, torch.Tensor) else torch.tensor(scaling_counts)
+            decoded_vectors = vmap(decode_single)(encoded_vectors, scaling_counts_numeric)
+            return decoded_vectors
+        except (ImportError, NotImplementedError):
+            # Fall back to loop if vmap is not available
+            pass
     
     # Fallback: loop-based implementation
     decoded_vectors = []
