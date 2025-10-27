@@ -1,6 +1,6 @@
-# E8 Optimized Examples
+# Optimized Quantization Examples
 
-This directory contains examples showcasing the optimized E8 implementation from `coset.optim.e8`.
+This directory contains examples showcasing the optimized quantization implementations from `coset.optim`, including E8 lattice quantization and scalar quantization.
 
 ## Examples
 
@@ -70,14 +70,42 @@ cd /workspace/coset
 python3 examples/optim/bert_binary_classification.py
 ```
 
-## E8 Optimized Implementation
+### 5. Scalar Quantization Comparison (`scalar_comparison.py`)
 
-These examples use the optimized E8 implementation from `coset.optim.e8` which includes:
+Comprehensive comparison of different scalar quantization methods on MNIST, including symmetric/asymmetric modes and different bit-widths.
 
+**Features:**
+- Standard MLP (no quantization baseline)
+- Scalar 4-bit symmetric quantization
+- Scalar 4-bit asymmetric quantization  
+- Scalar 8-bit symmetric quantization
+- Scalar 8-bit asymmetric quantization
+- E8 lattice quantization (reference)
+- Performance and accuracy trade-off analysis
+- Block-based and row-wise quantization support
+
+**Running:**
+```bash
+cd /workspace/coset
+python3 examples/optim/scalar_comparison.py
+```
+
+## Optimized Implementations
+
+These examples use the optimized implementations from `coset.optim` which include:
+
+### E8 Lattice Quantization (`coset.optim.e8`)
 - **E8Config**: E8-specific configuration with optimal beta values
 - **E8QLinear**: E8-optimized linear layer for QAT
 - **batch_e8_quantize**: Vectorized E8 quantization
 - **CUDA Kernels**: JIT-compiled CUDA acceleration (when available)
+
+### Scalar Quantization (`coset.optim.scalar`)
+- **ScalarConfig**: Configurable scalar quantization with q^M bit-widths
+- **ScalarQLinear**: Scalar quantized linear layer for QAT
+- **Symmetric/Asymmetric**: Both quantization modes supported
+- **Block-based**: Configurable block sizes (4, 8, or row-wise)
+- **Per-row scaling**: L2 norm scaling for stable quantization
 
 ## Performance Expectations
 

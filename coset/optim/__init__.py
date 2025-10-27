@@ -2,7 +2,8 @@
 Optimized Lattice Modules
 
 This package provides lattice-specific optimized implementations for different
-lattice types (E8, D4, etc.) with specialized codecs, layers, and CUDA acceleration.
+lattice types (E8, D4, etc.) and scalar quantization with specialized codecs, 
+layers, and CUDA acceleration.
 """
 
 # E8 optimized module
@@ -27,6 +28,38 @@ from .e8 import (
     e8_quantize_cuda_jit,
     e8_cuda_available,
     e8_quantize_cuda_wrapper,
+)
+
+# Scalar quantization module
+from .scalar import (
+    ScalarConfig,
+    get_scalar_config,
+    SCALAR_INT4_SYM,
+    SCALAR_INT8_SYM,
+    SCALAR_INT4_ASYM,
+    SCALAR_INT8_ASYM,
+    SCALAR_INT4_SYM_BLOCK4,
+    SCALAR_INT8_SYM_BLOCK4,
+    SCALAR_INT4_ASYM_BLOCK4,
+    SCALAR_INT8_ASYM_BLOCK4,
+    SCALAR_INT4_SYM_ROW,
+    SCALAR_INT8_SYM_ROW,
+    SCALAR_INT4_ASYM_ROW,
+    SCALAR_INT8_ASYM_ROW,
+    SCALAR_INT4_SYM_MATRIX,
+    SCALAR_INT8_SYM_MATRIX,
+    SCALAR_INT4_ASYM_MATRIX,
+    SCALAR_INT8_ASYM_MATRIX,
+    scalar_quantize,
+    batch_scalar_quantize,
+    scalar_dequantize,
+    symmetric_quantize,
+    asymmetric_quantize,
+    ScalarQLinear,
+    ScalarStraightThroughQuantize,
+    scalar_quantize_cuda_jit,
+    scalar_cuda_available,
+    scalar_quantize_cuda_wrapper,
 )
 
 # TODO: Add D4 optimized module when implemented
@@ -68,6 +101,36 @@ __all__ = [
     'e8_quantize_cuda_jit',
     'e8_cuda_available',
     'e8_quantize_cuda_wrapper',
+    
+    # Scalar exports
+    'ScalarConfig',
+    'get_scalar_config',
+    'SCALAR_INT4_SYM',
+    'SCALAR_INT8_SYM',
+    'SCALAR_INT4_ASYM',
+    'SCALAR_INT8_ASYM',
+    'SCALAR_INT4_SYM_BLOCK4',
+    'SCALAR_INT8_SYM_BLOCK4',
+    'SCALAR_INT4_ASYM_BLOCK4',
+    'SCALAR_INT8_ASYM_BLOCK4',
+    'SCALAR_INT4_SYM_ROW',
+    'SCALAR_INT8_SYM_ROW',
+    'SCALAR_INT4_ASYM_ROW',
+    'SCALAR_INT8_ASYM_ROW',
+    'SCALAR_INT4_SYM_MATRIX',
+    'SCALAR_INT8_SYM_MATRIX',
+    'SCALAR_INT4_ASYM_MATRIX',
+    'SCALAR_INT8_ASYM_MATRIX',
+    'scalar_quantize',
+    'batch_scalar_quantize',
+    'scalar_dequantize',
+    'symmetric_quantize',
+    'asymmetric_quantize',
+    'ScalarQLinear',
+    'ScalarStraightThroughQuantize',
+    'scalar_quantize_cuda_jit',
+    'scalar_cuda_available',
+    'scalar_quantize_cuda_wrapper',
     
     # TODO: Add D4 exports when implemented
 ]

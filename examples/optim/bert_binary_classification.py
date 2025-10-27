@@ -35,6 +35,16 @@ from coset.optim.e8 import (
 )
 from coset.lattices import E8Lattice
 
+# Import Scalar quantization modules
+from coset.optim.scalar import (
+    ScalarConfig,
+    ScalarQLinear,
+    SCALAR_INT4_SYM,
+    SCALAR_INT8_SYM,
+    SCALAR_INT4_ASYM,
+    SCALAR_INT8_ASYM
+)
+
 
 class TextDataset(Dataset):
     """Dataset for text binary classification."""
@@ -162,6 +172,68 @@ class QuantizedBERTBinaryClassifier(nn.Module):
             return "GPU (PyTorch)"
         else:
             return "CPU"
+
+
+class ScalarQuantizedBERTBinaryClassifier(nn.Module):
+    """Scalar-quantized BERT-based binary classifier."""
+    
+    def __init__(self, config: ScalarConfig, bert_model_name='bert-base-uncased', 
+                 hidden_dim=512, dropout=0.3, scale_factor=None):
+        super().__init__()
+        self.bert = BertModel.from_pretrained(bert_model_name)
+        self.config = config
+        
+        self.hidden_dim = hidden_dim
+        self.dropout = nn.Dropout(dropout)
+        
+        # Scalar-quantized MLP layers (with matrix-level quantization as default)
+        self.fc1 = ScalarQLinear(
+            self.bert.config.hidden_size, hidden_dim, config,
+            quantize_weights=True,
+            quantize_every=1,
+            scale_factor=scale_factor,
+            matrix_level_quantization=True  # Use matrix-level quantization
+        )
+        self.fc2 = ScalarQLinear(
+            hidden_dim, hidden_dim // 2, config,
+            quantize_weights=True,
+            quantize_every=1,
+            scale_factor=scale_factor,
+            matrix_level_quantization=True  # Use matrix-level quantization
+        )
+        
+        # Standard output layer (not quantized - single output)
+        self.fc3 = nn.Linear(hidden_dim // 2, 1)
+        
+        self.relu = nn.ReLU()
+    
+    def forward(self, input_ids, attention_mask):
+        # Get BERT embeddings (frozen)
+        with torch.no_grad():
+            outputs = self.bert(input_ids=input_ids, attention_mask=attention_mask)
+            pooled_output = outputs.pooler_output
+        
+        # Apply scalar-quantized MLP classifier
+        x = self.dropout(pooled_output)
+        x = self.relu(self.fc1(x))
+        x = self.dropout(x)
+        x = self.relu(self.fc2(x))
+        x = self.dropout(x)
+        x = self.fc3(x)  # Unquantized final layer
+        
+        return x.squeeze(-1)
+    
+    def get_quantization_stats(self):
+        """Get quantization statistics for this model."""
+        return {
+            "fc1": self.fc1.get_quantization_stats(),
+            "fc2": self.fc2.get_quantization_stats(),
+            "config": self.config.to_dict()
+        }
+    
+    def get_implementation_type(self):
+        """Get the implementation type for this model."""
+        return f"Scalar {self.config.mode} {self.config.effective_bits()}bit"
 
 
 def create_sample_data(num_samples=2000):
@@ -336,7 +408,7 @@ def main():
     
     # Create sample data
     print("\nCreating sample data...")
-    texts, labels = create_sample_data(num_samples=20000)
+    texts, labels = create_sample_data(num_samples=2000)
     
     # Split data
     train_texts, test_texts, train_labels, test_labels = train_test_split(
@@ -388,10 +460,29 @@ def main():
     else:
         cuda_quantized_model = None
     
+    # Scalar quantization configurations
+    scalar_configs = [
+        ("4-bit Symmetric", SCALAR_INT4_SYM),
+        ("8-bit Symmetric", SCALAR_INT8_SYM),
+        ("4-bit Asymmetric", SCALAR_INT4_ASYM),
+        ("8-bit Asymmetric", SCALAR_INT8_ASYM),
+    ]
+    
+    # Create scalar quantized models
+    scalar_models = {}
+    for name, scalar_config in scalar_configs:
+        scalar_models[name] = ScalarQuantizedBERTBinaryClassifier(
+            config=scalar_config,
+            hidden_dim=512
+        )
+    
     print(f"Standard Model: {sum(p.numel() for p in standard_model.parameters()):,} parameters")
-    print(f"Quantized Model: {sum(p.numel() for p in quantized_model.parameters()):,} parameters")
+    print(f"E8 Quantized Model: {sum(p.numel() for p in quantized_model.parameters()):,} parameters")
     if cuda_quantized_model:
         print(f"CUDA Quantized Model: {sum(p.numel() for p in cuda_quantized_model.parameters()):,} parameters")
+    
+    for name, model in scalar_models.items():
+        print(f"Scalar {name} Model: {sum(p.numel() for p in model.parameters()):,} parameters")
     
     # Check CUDA availability
     cuda_available = e8_cuda_available()
@@ -423,6 +514,18 @@ def main():
         cuda_speedup = quantized_time / cuda_time
         print(f"CUDA Speedup: {cuda_speedup:.2f}x faster than Quantized")
     
+    # Benchmark scalar quantized models
+    print("\nBenchmarking Scalar Quantized Models...")
+    scalar_times = {}
+    for name, model in scalar_models.items():
+        print(f"Benchmarking Scalar {name} Model...")
+        scalar_time = benchmark_forward_pass(model, test_loader, device, num_batches=20)
+        scalar_times[name] = scalar_time
+        print(f"Scalar {name} Forward Pass: {scalar_time:.3f} ms/batch")
+        
+        scalar_speedup = standard_time / scalar_time
+        print(f"Scalar {name} Speedup: {scalar_speedup:.2f}x {'faster' if scalar_speedup > 1 else 'slower'} than Standard")
+    
     # Train models
     print("\n" + "="*70)
     print("QUANTIZATION-AWARE TRAINING")
@@ -440,60 +543,100 @@ def main():
     else:
         cuda_history = None
     
+    # Train scalar quantized models
+    print("\nTraining Scalar Quantized Models...")
+    scalar_histories = {}
+    for name, model in scalar_models.items():
+        print(f"\nTraining Scalar {name} Model...")
+        scalar_histories[name] = train_model(model, train_loader, test_loader, epochs=3, device=device)
+    
     # Results comparison
     print("\n" + "="*70)
     print("RESULTS COMPARISON")
     print("="*70)
     
     print(f"Standard Model - Final Test Accuracy: {standard_history['test_accuracies'][-1]:.2f}%")
-    print(f"Quantized Model - Final Test Accuracy: {quantized_history['test_accuracies'][-1]:.2f}%")
+    print(f"E8 Quantized Model - Final Test Accuracy: {quantized_history['test_accuracies'][-1]:.2f}%")
     if cuda_history:
         print(f"CUDA Quantized Model - Final Test Accuracy: {cuda_history['test_accuracies'][-1]:.2f}%")
     
+    # Scalar model results
+    print(f"\nScalar Quantized Models - Final Test Accuracies:")
+    for name, history in scalar_histories.items():
+        print(f"  Scalar {name}: {history['test_accuracies'][-1]:.2f}%")
+    
     # Accuracy drop analysis
     quantized_accuracy_drop = standard_history['test_accuracies'][-1] - quantized_history['test_accuracies'][-1]
-    print(f"\nAccuracy Drop (Quantized vs Standard): {quantized_accuracy_drop:.2f}%")
+    print(f"\nAccuracy Drop (E8 Quantized vs Standard): {quantized_accuracy_drop:.2f}%")
     
     if cuda_history:
         cuda_accuracy_drop = standard_history['test_accuracies'][-1] - cuda_history['test_accuracies'][-1]
         print(f"Accuracy Drop (CUDA Quantized vs Standard): {cuda_accuracy_drop:.2f}%")
+    
+    # Scalar accuracy drops
+    print(f"\nScalar Quantized Models - Accuracy Drops vs Standard:")
+    for name, history in scalar_histories.items():
+        scalar_accuracy_drop = standard_history['test_accuracies'][-1] - history['test_accuracies'][-1]
+        print(f"  Scalar {name}: {scalar_accuracy_drop:.2f}%")
     
     # Performance summary
     print(f"\n" + "="*70)
     print("PERFORMANCE SUMMARY")
     print("="*70)
     print(f"Standard Forward Pass: {standard_time:.3f} ms/batch")
-    print(f"Quantized Forward Pass: {quantized_time:.3f} ms/batch")
-    print(f"Quantized Speedup: {speedup:.2f}x")
+    print(f"E8 Quantized Forward Pass: {quantized_time:.3f} ms/batch")
+    print(f"E8 Quantized Speedup: {speedup:.2f}x")
     if cuda_quantized_model and torch.cuda.is_available():
         print(f"CUDA Forward Pass: {cuda_time:.3f} ms/batch")
         print(f"CUDA Speedup: {cuda_speedup:.2f}x")
     
+    print(f"\nScalar Quantized Forward Pass Times:")
+    for name, time in scalar_times.items():
+        speedup = standard_time / time
+        print(f"  Scalar {name}: {time:.3f} ms/batch (speedup: {speedup:.2f}x)")
+    
     print(f"\nFinal Accuracies:")
     print(f"  Standard Model: {standard_history['test_accuracies'][-1]:.2f}%")
-    print(f"  Quantized Model: {quantized_history['test_accuracies'][-1]:.2f}%")
+    print(f"  E8 Quantized Model: {quantized_history['test_accuracies'][-1]:.2f}%")
     if cuda_history:
         print(f"  CUDA Quantized Model: {cuda_history['test_accuracies'][-1]:.2f}%")
+    for name, history in scalar_histories.items():
+        print(f"  Scalar {name}: {history['test_accuracies'][-1]:.2f}%")
     
     # Quantization statistics
-    print(f"\nQuantization Statistics (Quantized Model):")
+    print(f"\nE8 Quantization Statistics:")
     for name, module in quantized_model.named_modules():
         if isinstance(module, E8QLinear):
             stats = module.get_quantization_stats()
             print(f"  {name}: {stats['step_count']} quantization steps")
     
-    print("\nBERT Binary Classification with E8 Quantization Complete!")
+    # Scalar quantization statistics
+    print(f"\nScalar Quantization Statistics:")
+    for scalar_name, scalar_model in scalar_models.items():
+        print(f"  Scalar {scalar_name}:")
+        for name, module in scalar_model.named_modules():
+            if isinstance(module, ScalarQLinear):
+                stats = module.get_quantization_stats()
+                print(f"    {name}: {stats['step_count']} quantization steps, matrix_level={stats['matrix_level_quantization']}")
+    
+    print("\nBERT Binary Classification with E8 and Scalar Quantization Complete!")
     print("\n" + "="*70)
     print("IMPLEMENTATION SUMMARY")
     print("="*70)
     print("✓ BERT embeddings: Frozen pre-trained features")
-    print("✓ MLP layers: E8-quantized for compression")
+    print("✓ MLP layers: E8-quantized and Scalar-quantized for compression")
     print("✓ Output layer: Unquantized (single output)")
     print("✓ QAT: Quantization-Aware Training enabled")
+    print("✓ Scalar quantization: Matrix-level quantization as default")
+    print("✓ Scalar configurations: 4-bit/8-bit symmetric/asymmetric")
     if cuda_available:
         print("✓ CUDA: Custom kernels available (with compilation issues)")
     else:
         print("✗ CUDA: Not available")
+    print("✓ Performance: Forward pass benchmarking included")
+    print("✓ Training: 3 epochs with AdamW optimizer")
+    print("✓ Evaluation: Accuracy comparison and analysis")
+    print("✓ Comparison: E8 vs Scalar quantization performance")
     print("="*70)
 
 
