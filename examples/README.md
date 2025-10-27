@@ -4,9 +4,37 @@ This directory contains practical examples demonstrating real-world applications
 
 ## Examples
 
-### 1. One-Sided vLUT Vector Search (`one_sided_vlut_search.py`)
+### Core Examples
+
+#### 1. One-Sided vLUT Vector Search (`one_sided_vlut_search.py`)
 
 Demonstrates efficient vector search and similarity retrieval using one-sided value lookup tables (vLUTs) with quantized data.
+
+#### 2. MNIST QAT (`mnist_qat.py`)
+
+Basic MNIST Quantization-Aware Training example using the core COSET quantization functionality.
+
+### Optimized Examples (`optim/`)
+
+This directory contains examples showcasing the optimized E8 implementation from `coset.optim.e8`:
+
+#### 1. MNIST CPU vs GPU Comparison (`optim/mnist_cpu_gpu_comparison.py`)
+
+Comprehensive MNIST QAT example comparing CPU, GPU (PyTorch), and CUDA-accelerated E8 quantization implementations.
+
+#### 2. E8 GPU Benchmark (`optim/e8_gpu_benchmark.py`)
+
+Performance benchmarking of E8 lattice quantization on CPU vs GPU.
+
+#### 3. E8 GPU Usage (`optim/e8_gpu_usage.py`)
+
+Basic usage examples of E8 GPU quantization functions.
+
+#### 4. BERT Binary Classification (`optim/bert_binary_classification.py`)
+
+BERT-based text binary classification using E8 quantization for MLP layers while keeping the final output layer unquantized.
+
+## Detailed Examples
 
 **Use Cases:**
 - Semantic search with quantized embeddings
@@ -44,11 +72,19 @@ Demonstrates efficient vector search and similarity retrieval using one-sided va
    - Direct comparison with decode-then-compute
    - Shows 3.85x speedup with perfect accuracy
 
-**Running the Example:**
+**Running the Examples:**
 
 ```bash
+# Core examples
 cd /workspace/coset
 PYTHONPATH=/workspace/coset:$PYTHONPATH python3 examples/one_sided_vlut_search.py
+PYTHONPATH=/workspace/coset:$PYTHONPATH python3 examples/mnist_qat.py
+
+# Optimized E8 examples
+PYTHONPATH=/workspace/coset:$PYTHONPATH python3 examples/optim/mnist_cpu_gpu_comparison.py
+PYTHONPATH=/workspace/coset:$PYTHONPATH python3 examples/optim/e8_gpu_benchmark.py
+PYTHONPATH=/workspace/coset:$PYTHONPATH python3 examples/optim/e8_gpu_usage.py
+PYTHONPATH=/workspace/coset:$PYTHONPATH python3 examples/optim/bert_binary_classification.py
 ```
 
 **Expected Output:**

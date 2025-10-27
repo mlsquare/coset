@@ -32,6 +32,9 @@ dependencies = [
     "torch>=2.0.0",
     "numpy>=1.21.0",
     "scipy>=1.7.0",
+    "scikit-learn>=1.0.0",
+    "transformers>=4.20.0",
+    "torchvision>=0.15.0",
 ]
 
 [project.optional-dependencies]
@@ -45,6 +48,11 @@ dev = [
 ]
 cuda = [
     "torch[cuda]>=2.0.0",
+]
+examples = [
+    "scikit-learn>=1.0.0",
+    "transformers>=4.20.0",
+    "torchvision>=0.15.0",
 ]
 docs = [
     "sphinx>=5.0.0",

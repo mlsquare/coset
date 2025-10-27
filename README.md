@@ -19,6 +19,17 @@ A high-performance PyTorch library implementing **Hierarchical Nested-Lattice Qu
 
 ## Installation
 
+### Quick Setup (Recommended)
+
+```bash
+# Clone and setup everything
+git clone https://github.com/coset/coset.git
+cd coset
+./setup.sh
+```
+
+### Manual Installation
+
 ```bash
 # Install from source
 git clone https://github.com/coset/coset.git
@@ -28,9 +39,36 @@ pip install -e .
 # Install with CUDA support
 pip install -e ".[cuda]"
 
+# Install with example dependencies
+pip install -e ".[examples]"
+
 # Install with development dependencies
 pip install -e ".[dev]"
 ```
+
+### Alternative Installation Methods
+
+```bash
+# Using requirements files
+pip install -r requirements.txt
+pip install -e .
+
+# Or install examples separately
+pip install -e .
+pip install -r requirements-examples.txt
+```
+
+### Dependencies
+
+**Core Dependencies:**
+- PyTorch >= 2.0.0
+- NumPy >= 1.21.0
+- SciPy >= 1.7.0
+
+**Example Dependencies:**
+- scikit-learn >= 1.0.0
+- transformers >= 4.20.0
+- torchvision >= 0.15.0
 
 ## Quick Start
 
