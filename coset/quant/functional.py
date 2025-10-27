@@ -68,7 +68,8 @@ def encode(
 def _encode_internal(
     x: torch.Tensor, 
     lattice: Lattice, 
-    config: QuantizationConfig
+    config: QuantizationConfig,
+    check_overload: bool = True
 ) -> Tuple[torch.Tensor, bool]:
     """
     Internal encoding function that performs hierarchical quantization.
@@ -77,6 +78,7 @@ def _encode_internal(
         x: Input vector (already scaled and dithered)
         lattice: Lattice instance
         config: Quantization configuration
+        check_overload: Whether to check for overload (can be disabled for performance)
         
     Returns:
         Tuple of (encoding_vectors, overload_error)
@@ -95,8 +97,11 @@ def _encode_internal(
         # Scale down for next level
         x_l = x_l / config.q
     
-    # Check for overload
-    overload_error = not torch.allclose(lattice.Q(x_l), torch.zeros_like(x_l), atol=1e-8)
+    # Check for overload (can be skipped for performance when using vmap)
+    if check_overload:
+        overload_error = not torch.allclose(lattice.Q(x_l), torch.zeros_like(x_l), atol=1e-8)
+    else:
+        overload_error = False
     
     return torch.stack(encoding_vectors), overload_error
 
@@ -267,6 +272,9 @@ def batch_encode(
     """
     Encode multiple vectors efficiently.
     
+    Uses torch.vmap for automatic vectorization when possible, falling back to
+    a loop for stability when overload protection is enabled.
+    
     Args:
         X: Input matrix where each row is a vector to encode
         lattice: Lattice instance
@@ -282,6 +290,34 @@ def batch_encode(
         X = X.reshape(1, -1)
     
     batch_size = X.shape[0]
+    
+    # If overload protection is disabled, we can use vmap for efficient vectorization
+    # Otherwise, we need to fall back to a loop because of the while loop in encode
+    if config.disable_overload_protection:
+        try:
+            from torch.func import vmap
+            
+            def encode_single(x_vec):
+                """Wrapper for encode that returns tuple properly, skipping overload check."""
+                # Call _encode_internal directly with check_overload=False for better performance
+                x_scaled = x_vec / config.beta
+                if config.with_dither and dither is not None:
+                    x_scaled = x_scaled + dither.flatten()
+                
+                # Encode without overload check for maximum performance
+                encoding_vectors, _ = _encode_internal(x_scaled, lattice, config, check_overload=False)
+                # Always return T=0 since we skip overload handling
+                return encoding_vectors, torch.tensor(0, dtype=torch.int64)
+            
+            # Use vmap to vectorize over the batch dimension
+            encoded_vectors, scaling_counts = vmap(encode_single)(X)
+            return encoded_vectors, scaling_counts
+        except (ImportError, NotImplementedError):
+            # Fall back to loop if vmap is not available
+            pass
+    
+    # Fallback: loop-based implementation
+    # Pre-allocate tensors for better performance
     encoded_vectors = []
     scaling_counts = []
     
@@ -303,6 +339,8 @@ def batch_decode(
     """
     Decode multiple vectors efficiently.
     
+    Uses torch.vmap for automatic vectorization for better performance.
+    
     Args:
         encoded_vectors: Tensor of shape [batch_size, M, d]
         scaling_counts: Tensor of shape [batch_size]
@@ -314,8 +352,26 @@ def batch_decode(
         Matrix where each row is a decoded vector
     """
     batch_size = encoded_vectors.shape[0]
-    decoded_vectors = []
     
+    # Try to use vmap for efficient vectorization
+    try:
+        from torch.func import vmap
+        
+        def decode_single(b_encoded, t):
+            """Wrapper for decode."""
+            return decode(b_encoded, lattice, config, t.item() if isinstance(t, torch.Tensor) else t, dither)
+        
+        # Use vmap to vectorize over the batch dimension
+        # scale_counts might be int or tensor, so we need to handle both
+        scaling_counts_numeric = scaling_counts if isinstance(scaling_counts, torch.Tensor) else torch.tensor(scaling_counts)
+        decoded_vectors = vmap(decode_single)(encoded_vectors, scaling_counts_numeric)
+        return decoded_vectors
+    except (ImportError, NotImplementedError):
+        # Fall back to loop if vmap is not available
+        pass
+    
+    # Fallback: loop-based implementation
+    decoded_vectors = []
     for i in range(batch_size):
         decoded = decode(encoded_vectors[i], lattice, config, scaling_counts[i].item(), dither)
         decoded_vectors.append(decoded)
