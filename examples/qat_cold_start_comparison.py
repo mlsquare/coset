@@ -34,11 +34,37 @@ except ImportError as e:
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
 
+class BaselineMLP(nn.Module):
+    """Baseline MLP without quantization."""
+    
+    def __init__(self, input_size=784, hidden_size=128, output_size=10):
+        super().__init__()
+        self.fc1 = nn.Linear(input_size, hidden_size)
+        self.fc2 = nn.Linear(hidden_size, output_size)
+        self.relu = nn.ReLU()
+    
+    def forward(self, x):
+        x = x.view(x.size(0), -1)
+        x = self.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x
+    
+    def update_epoch(self, epoch):
+        """Dummy method for compatibility with QAT models."""
+        pass
+    
+    def get_diagnostics(self):
+        """Dummy method for compatibility with QAT models."""
+        return {
+            'fc1': {'error': 'No diagnostics for baseline model'},
+            'fc2': {'error': 'No diagnostics for baseline model'}
+        }
+
 class QATMLP(nn.Module):
     """MLP with QAT cold start support."""
     
     def __init__(self, input_size=784, hidden_size=128, output_size=10, 
-                 warmup_epochs=0, enable_diagnostics=False, q=4):
+                 warmup_epochs=0, enable_diagnostics=False, q=4, weight_clip_value=2.0):
         super().__init__()
         
         self.config = LatticeConfig(
@@ -69,7 +95,8 @@ class QATMLP(nn.Module):
             quantize_fn=lambda x, q_val: x,  # Placeholder
             q=q,
             warmup_epochs=warmup_epochs,
-            enable_diagnostics=enable_diagnostics
+            enable_diagnostics=enable_diagnostics,
+            weight_clip_value=weight_clip_value
         )
         self.fc2 = HNLQLinearQAT(
             in_features=hidden_size,
@@ -79,7 +106,8 @@ class QATMLP(nn.Module):
             quantize_fn=lambda x, q_val: x,
             q=q,
             warmup_epochs=warmup_epochs,
-            enable_diagnostics=enable_diagnostics
+            enable_diagnostics=enable_diagnostics,
+            weight_clip_value=weight_clip_value
         )
         
         # Initialize with proper E8 configuration
@@ -129,7 +157,7 @@ class QATMLP(nn.Module):
             'fc2': self.fc2.get_diagnostic_summary()
         }
 
-def load_mnist_data(batch_size=64, data_fraction=0.1):
+def load_mnist_data(batch_size=128, data_fraction=0.8):
     """Load MNIST dataset with specified fraction."""
     transform = transforms.Compose([
         transforms.ToTensor(),
@@ -154,14 +182,18 @@ def load_mnist_data(batch_size=64, data_fraction=0.1):
     
     return train_loader, test_loader
 
-def train_qat_model(model, train_loader, test_loader, epochs=5, lr=0.001, model_name="QAT Model"):
+def train_qat_model(model, train_loader, test_loader, epochs=15, lr=1e-3, model_name="QAT Model"):
     """Train a QAT model with cold start support."""
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = nn.CrossEntropyLoss()
     
     print(f"\nTraining {model_name} for {epochs} epochs...")
-    print(f"Warmup epochs: {model.fc1.warmup_epochs}")
+    # Print warmup info (only for QAT models)
+    if hasattr(model.fc1, 'warmup_epochs'):
+        print(f"Warmup epochs: {model.fc1.warmup_epochs}")
+    else:
+        print("Warmup epochs: N/A (Baseline model)")
     
     results = {
         'train_acc': [],
@@ -230,7 +262,7 @@ def train_qat_model(model, train_loader, test_loader, epochs=5, lr=0.001, model_
         results['test_loss'].append(test_loss / len(test_loader))
         
         # Get quantization diagnostics
-        if model.fc1.enable_diagnostics:
+        if hasattr(model.fc1, 'enable_diagnostics') and model.fc1.enable_diagnostics:
             diagnostics = model.get_diagnostics()
             quant_error = (diagnostics['fc1']['quantization_error'] + 
                           diagnostics['fc2']['quantization_error']) / 2
@@ -247,33 +279,42 @@ def train_qat_model(model, train_loader, test_loader, epochs=5, lr=0.001, model_
     return results
 
 def run_cold_start_comparison():
-    """Run comprehensive cold start comparison with different quantization levels."""
+    """Run comprehensive cold start comparison for q=4 with extended training."""
     print("=" * 80)
-    print("QAT COLD START COMPARISON - MULTIPLE QUANTIZATION LEVELS")
+    print("QAT COLD START COMPARISON - Q=4 WITH EXTENDED TRAINING")
     print("=" * 80)
     
-    # Load data
-    train_loader, test_loader = load_mnist_data(batch_size=256, data_fraction=0.1)
+    # Load data with larger dataset
+    train_loader, test_loader = load_mnist_data(batch_size=128, data_fraction=0.8)
     print(f"Training samples: {len(train_loader.dataset)}")
     print(f"Test samples: {len(test_loader.dataset)}")
     
-    # Test configurations: different q values and cold start strategies
+    # Test configurations: multiple warmup strategies for q=4
     configurations = []
     
-    # Test different quantization levels
-    q_values = [4, 16, 32]
+    # Test multiple warmup strategies
     cold_start_strategies = [
         {"warmup_epochs": 0, "name": "No Cold Start"},
         {"warmup_epochs": 2, "name": "Short Cold Start (2 epochs)"},
-        {"warmup_epochs": 5, "name": "Long Cold Start (5 epochs)"},
+        {"warmup_epochs": 5, "name": "Medium Cold Start (5 epochs)"},
+        {"warmup_epochs": 10, "name": "Long Cold Start (10 epochs)"},
     ]
     
-    for q in q_values:
-        for strategy in cold_start_strategies:
-            config = strategy.copy()
-            config["q"] = q
-            config["name"] = f"{strategy['name']} (q={q})"
-            configurations.append(config)
+    # Focus on q=4 only
+    q = 4
+    for strategy in cold_start_strategies:
+        config = strategy.copy()
+        config["q"] = q
+        config["name"] = f"{strategy['name']} (q={q})"
+        configurations.append(config)
+    
+    # Add baseline (no quantization)
+    configurations.append({
+        "warmup_epochs": 0, 
+        "name": "Baseline (No Quantization)", 
+        "q": None,
+        "is_baseline": True
+    })
     
     results = {}
     
@@ -283,19 +324,27 @@ def run_cold_start_comparison():
         print(f"{'='*60}")
         
         # Create model
-        model = QATMLP(
-            input_size=784,
-            hidden_size=128,
-            output_size=10,
-            warmup_epochs=config['warmup_epochs'],
-            enable_diagnostics=True,
-            q=config['q']
-        )
+        if config.get('is_baseline', False):
+            model = BaselineMLP(
+                input_size=784,
+                hidden_size=128,
+                output_size=10
+            )
+        else:
+            model = QATMLP(
+                input_size=784,
+                hidden_size=128,
+                output_size=10,
+                warmup_epochs=config['warmup_epochs'],
+                enable_diagnostics=True,
+                q=config['q'],
+                weight_clip_value=1.5  # Add weight clipping
+            )
         
         # Train model
         model_results = train_qat_model(
             model, train_loader, test_loader, 
-            epochs=8,  # More epochs to see cold start effect
+            epochs=15,  # Extended training to see cold start effect
             model_name=config['name']
         )
         
