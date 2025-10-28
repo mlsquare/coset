@@ -20,7 +20,6 @@ __author__ = "Coset Development Team"
 from .core import (
     # Main layers
     HNLQLinear,
-    ScalarQLinear,
     # E8 convenience
     create_e8_hnlq_linear,
     # STE utilities
@@ -51,7 +50,6 @@ decode = legacy_decode
 __all__ = [
     # Core functionality (recommended)
     "HNLQLinear",
-    "ScalarQLinear",
     "create_e8_hnlq_linear",
     "ste_quantize",
     

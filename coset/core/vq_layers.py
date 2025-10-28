@@ -1,15 +1,21 @@
 """
-Vector Quantization Layers
+Vector Quantization Layers with QAT Cold Start
 
 This module provides vector quantization layers with hierarchical nested lattice quantization (HNLQ)
-and learnable scale quantization (LSQ) for quantization-aware training.
+and learnable scale quantization (LSQ) for quantization-aware training with cold start support.
+
+Features:
+- Cold start (warmup) training: Train without quantization for specified epochs
+- Weight diagnostics: Quantile statistics, quantization error analysis
+- Epoch tracking: Automatic quantization enable/disable based on epoch
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Optional, Union, Dict, Any
+from typing import Optional, Union, Dict, Any, List, Tuple
 from dataclasses import dataclass
+import numpy as np
 
 def ste_round(x):
     """Straight-through estimator for rounding."""
@@ -104,6 +110,8 @@ def ste_quantize(x, quantize_fn, q):
     return StraightThroughQuantize.apply(x, quantize_fn, q)
 
 
+
+
 # ---------- Activation Quantizer (LSQ-A style, per-tensor) ----------
 
 class LSQActivation(nn.Module):
@@ -155,19 +163,21 @@ class HNLQConfig:
             raise ValueError(f"block_size must be positive, got {self.block_size}")
 
 
-class HNLQLinear(nn.Module):
+class HNLQLinearQAT(nn.Module):
     """
-    Hierarchical Nested Lattice Quantization Linear Layer.
+    Hierarchical Nested Lattice Quantization Linear Layer with QAT Cold Start.
     
     This layer implements quantization-aware training with hierarchical nested lattice quantization
-    for the weights and optional activation quantization using LSQ.
+    for the weights and optional activation quantization using LSQ, with cold start support.
     
     The layer supports:
+    - Cold start (warmup) training: Train without quantization for specified epochs
     - Learnable scaling factors (beta) for weights
     - Flexible tiling (row-level or block-level scaling)
     - Optional activation quantization
     - Multiple lattice types (E8, D4, etc.)
     - Various weight initialization methods
+    - Weight diagnostics and quantization analysis
     
     Args:
         in_features: Input dimension
@@ -189,6 +199,8 @@ class HNLQLinear(nn.Module):
         init_method: Weight initialization method
         init_kwargs: Additional arguments for weight initialization
         bias: Whether to use bias
+        warmup_epochs: Number of epochs to train without quantization (cold start)
+        enable_diagnostics: Whether to enable weight diagnostics
     """
     
     def __init__(
@@ -203,7 +215,6 @@ class HNLQLinear(nn.Module):
         M: int = 2,
         Delta0: float = 1.5,
         eta: float = 0.1,
-        k: int = 1,
         tiling: str = 'row',
         block_size: int = 8,
         quantize_activations: bool = False,
@@ -211,7 +222,10 @@ class HNLQLinear(nn.Module):
         act_init_alpha: float = 1.0,
         init_method: str = 'normal',
         init_kwargs: Optional[Dict[str, Any]] = None,
-        bias: bool = True
+        bias: bool = True,
+        warmup_epochs: int = 0,
+        enable_diagnostics: bool = False,
+        weight_clip_value: float = 2.0
     ):
         super().__init__()
         
@@ -223,7 +237,6 @@ class HNLQLinear(nn.Module):
         self.M = M
         self.Delta0 = Delta0
         self.eta = eta
-        self.k = k
         self.tiling = tiling
         self.block_size = block_size
         self.quantize_activations = quantize_activations
@@ -250,19 +263,36 @@ class HNLQLinear(nn.Module):
         else:
             self.register_parameter('bias', None)
         
-        # Initialize scaling factors
-        if tiling == 'row':
-            self.theta_beta = nn.Parameter(torch.ones(out_features, k))
-        elif tiling == 'block':
-            self.theta_beta = nn.Parameter(torch.ones(out_features, self.blocks_per_row, k))
-        else:
-            raise ValueError(f"Unknown tiling: {tiling}")
+        # Tiling configuration - theta_beta is single scalar per tile
+        tiles = out_features if tiling == 'row' else out_features * (in_features // block_size)
+        self.theta_beta = nn.Parameter(torch.zeros(tiles))
+        
+        # EMA buffers for adaptive scaling
+        self.register_buffer('sigma_ema', torch.ones(tiles))
+        self.register_buffer('xmax_ema', torch.ones(tiles))
+        self.ema_momentum = 0.99
+        self.stat_update_interval = 256
+        self.register_buffer('step_count', torch.tensor(0, dtype=torch.long))
+        
+        # Compute gamma_inv from lattice
+        self.register_buffer('gamma_inv', (Ginv.abs().sum(dim=1)).max())
         
         # Initialize activation quantizer if requested
         if quantize_activations:
             self.actq = LSQActivation(bit_width=act_bit_width, init_alpha=act_init_alpha)
         else:
             self.actq = None
+        
+        # Cold start (QAT warmup) parameters
+        self.warmup_epochs = warmup_epochs
+        self.current_epoch = 0
+        self.quantization_enabled = warmup_epochs == 0  # Enable quantization immediately if no warmup
+        self.enable_diagnostics = enable_diagnostics
+        self.weight_clip_value = weight_clip_value
+        
+        # Diagnostic storage
+        self._weight_history = [] if enable_diagnostics else None
+        self._quantization_errors = [] if enable_diagnostics else None
     
     def _initialize_weights(self):
         """Initialize weights using the specified method."""
@@ -316,42 +346,109 @@ class HNLQLinear(nn.Module):
         
         self.load_weights(linear_layer.weight.data, linear_layer.bias.data if linear_layer.bias is not None else None)
     
+    def _gather_stats(self, W_blocks):
+        """Gather EMA statistics from weight blocks."""
+        with torch.no_grad():
+            m = self.ema_momentum
+            if self.tiling == 'row':
+                sigma = W_blocks.std(dim=(1,2)) + 1e-8
+                xmax = W_blocks.abs().amax(dim=(1,2)) + 1e-8
+                self.sigma_ema[:self.out_features].mul_(m).add_((1-m)*sigma)
+                self.xmax_ema[:self.out_features].mul_(m).add_((1-m)*xmax)
+            else:  # block
+                sigma = W_blocks.std(dim=2).reshape(-1) + 1e-8
+                xmax = W_blocks.abs().amax(dim=2).reshape(-1) + 1e-8
+                self.sigma_ema.mul_(m).add_((1-m)*sigma)
+                self.xmax_ema.mul_(m).add_((1-m)*xmax)
+    
+    def _bounds(self):
+        """Compute adaptive beta bounds from EMA statistics."""
+        qM = float(self.q ** self.M)
+        ginv = float(self.gamma_inv)
+        
+        # Minimum bound: ensure quantization range covers eta*sigma
+        beta_min = (self.Delta0 / qM) / (self.eta * ginv * self.sigma_ema)
+        
+        # Maximum bounds: deterministic (xmax) and probabilistic (eta*sigma)
+        beta_max_det = (self.Delta0 * qM) / (2 * ginv * self.xmax_ema)
+        beta_max_prob = (self.Delta0 * qM) / (2 * self.eta * ginv * self.sigma_ema)
+        
+        beta_max = torch.minimum(beta_max_det, beta_max_prob)
+        beta_min = torch.minimum(beta_min, beta_max * 0.9)
+        
+        return beta_min, beta_max
+    
     def _quantize_weights(self):
         """Quantize weights using hierarchical nested lattice quantization."""
         W = self.weight  # [out_dim, in_dim]
         
-        # Reshape to blocks
-        W_blocks = W.view(self.out_features, self.blocks_per_row, self.block_size)  # [out_dim, blocks_per_row, block_size]
+        # Cold start: return original weights if quantization is disabled
+        if not self.quantization_enabled:
+            if self.enable_diagnostics:
+                self._weight_history.append(W.detach().clone())
+            return W
         
-        # Apply scaling
+        # Update statistics periodically
+        self.step_count += 1
+        if (self.step_count % self.stat_update_interval) == 0:
+            # Reshape to blocks temporarily for statistics gathering
+            W_blocks_temp = W.view(self.out_features, self.blocks_per_row, self.block_size)
+            self._gather_stats(W_blocks_temp.detach())
+        
+        # Compute adaptive beta bounds
+        beta_min, beta_max = self._bounds()
+        
+        # Compute beta from learnable theta using sigmoid interpolation
         if self.tiling == 'row':
-            # Row-level scaling: each row gets k scaling factors
-            theta_beta = self.theta_beta  # [out_dim, k]
-            # Broadcast to blocks: [out_dim, 1, k] -> [out_dim, blocks_per_row, k]
-            theta_beta_expanded = theta_beta.unsqueeze(1).expand(-1, self.blocks_per_row, -1)
+            theta = self.theta_beta[:self.out_features]
+            beta_row = beta_min[:self.out_features] + torch.sigmoid(theta) * (beta_max[:self.out_features] - beta_min[:self.out_features])
+            beta = beta_row.view(-1, 1)  # [out_features, 1] - one scaling factor per row
         else:  # block
-            # Block-level scaling: each block gets k scaling factors
-            theta_beta = self.theta_beta  # [out_dim, blocks_per_row, k]
-            theta_beta_expanded = theta_beta
+            theta = self.theta_beta
+            beta = beta_min + torch.sigmoid(theta) * (beta_max - beta_min)
+            beta = beta.view(self.out_features, self.blocks_per_row, 1)
         
-        # Apply scaling to each block
-        scaling_factors = theta_beta_expanded.mean(dim=-1, keepdim=True)  # [out_dim, blocks_per_row, 1]
-        W_scaled = W_blocks * scaling_factors  # [out_dim, blocks_per_row, block_size]
+        # Apply scaling BEFORE tiling
+        if self.tiling == 'row':
+            # Scale each row by its corresponding beta
+            W_scaled = W * beta  # [out_features, in_features] * [out_features, 1] -> [out_features, in_features]
+        else:  # block
+            # For block tiling, we need to reshape and apply per-block scaling
+            W_blocks = W.view(self.out_features, self.blocks_per_row, self.block_size)
+            W_scaled_blocks = W_blocks * beta  # [out_features, blocks_per_row, block_size] * [out_features, blocks_per_row, 1]
+            W_scaled = W_scaled_blocks.reshape(self.out_features, self.in_features)
         
-        # Reshape to blocks for quantization: [out_dim, blocks_per_row, block_size]
-        # Then reshape to [total_blocks, block_size] for per-block quantization
-        W_blocks_flat = W_scaled.reshape(-1, self.block_size)  # [out_dim * blocks_per_row, block_size]
+        # Now tile the scaled weights for quantization
+        W_blocks = W_scaled.view(self.out_features, self.blocks_per_row, self.block_size)
+        W_blocks_flat = W_blocks.reshape(-1, self.block_size)  # [out_dim * blocks_per_row, block_size]
         
         # Quantize using STE (Straight-Through Estimator)
         # This allows gradients to flow through quantization during training
         W_quantized_blocks = ste_quantize(W_blocks_flat, self.quantize_fn, self.q)
         
-        # Reshape back to block shape and rescale back to original scale
+        # Reshape back to block shape (no rescaling - keep in scaled space)
         W_quantized_blocks_reshaped = W_quantized_blocks.reshape(self.out_features, self.blocks_per_row, self.block_size)
-        W_quantized = W_quantized_blocks_reshaped / scaling_factors  # Rescale back to original scale
         
         # Reshape to original weight shape
-        W_quantized = W_quantized.reshape(self.out_features, self.in_features)
+        W_quantized = W_quantized_blocks_reshaped.reshape(self.out_features, self.in_features)
+        
+        # Rescale the weights to the original scale
+        if self.tiling == 'row':
+            # For row tiling, beta is already [out_features, 1]
+            W_quantized = W_quantized / beta
+        else:  # block
+            # For block tiling, beta is [out_features, blocks_per_row, 1]
+            # Reshape beta to [out_features, in_features] for division
+            beta_reshaped = beta.reshape(self.out_features, self.in_features)
+            W_quantized = W_quantized / beta_reshaped
+        
+        # Apply weight clipping to stabilize training
+        W_quantized = torch.clamp(W_quantized, -self.weight_clip_value, self.weight_clip_value)
+        
+        # Store diagnostics if enabled
+        if self.enable_diagnostics:
+            self._weight_history.append(W.detach().clone())
+            self._quantization_errors.append(torch.norm(W - W_quantized).item())
         
         return W_quantized
     
@@ -368,6 +465,140 @@ class HNLQLinear(nn.Module):
             x = self.actq(x)
         
         return x
+    
+    # Cold start control methods
+    def update_epoch(self, epoch: int):
+        """Update current epoch and enable quantization if warmup is complete."""
+        self.current_epoch = epoch
+        if epoch >= self.warmup_epochs and not self.quantization_enabled:
+            self.quantization_enabled = True
+            print(f"Epoch {epoch}: Enabling quantization (warmup complete)")
+    
+    def enable_quantization(self):
+        """Manually enable quantization."""
+        self.quantization_enabled = True
+        print("Quantization manually enabled")
+    
+    def disable_quantization(self):
+        """Manually disable quantization."""
+        self.quantization_enabled = False
+        print("Quantization manually disabled")
+    
+    def is_quantization_enabled(self) -> bool:
+        """Check if quantization is currently enabled."""
+        return self.quantization_enabled
+    
+    # Weight diagnostic methods
+    def get_weight_quantiles(self, quantiles: List[float] = None) -> torch.Tensor:
+        """Get quantiles of the current weight matrix."""
+        if quantiles is None:
+            quantiles = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+        
+        W = self.weight.detach().flatten()
+        return torch.quantile(W, torch.tensor(quantiles, device=W.device))
+    
+    def get_weight_statistics(self) -> Dict[str, float]:
+        """Get comprehensive statistics of the current weight matrix."""
+        W = self.weight.detach()
+        return {
+            'mean': W.mean().item(),
+            'std': W.std().item(),
+            'min': W.min().item(),
+            'max': W.max().item(),
+            'median': W.median().item(),
+            'l2_norm': torch.norm(W).item(),
+            'l1_norm': torch.norm(W, p=1).item(),
+        }
+    
+    def get_quantization_error(self) -> float:
+        """Get L2 quantization error between original and quantized weights."""
+        if not self.quantization_enabled:
+            return 0.0
+        
+        W_orig = self.weight.detach()
+        W_quant = self._quantize_weights().detach()
+        return torch.norm(W_orig - W_quant).item()
+    
+    def get_scaling_factors(self) -> torch.Tensor:
+        """Get current scaling factors (theta_beta)."""
+        return self.theta_beta.detach()
+    
+    def get_quantization_histogram(self, bins: int = 50) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Get histogram of quantized weight values."""
+        if not self.quantization_enabled:
+            W = self.weight.detach()
+        else:
+            W = self._quantize_weights().detach()
+        
+        W_flat = W.flatten()
+        hist, bin_edges = torch.histogram(W_flat, bins=bins)
+        return hist, bin_edges
+    
+    def get_sparsity_ratio(self, threshold: float = 1e-6) -> float:
+        """Get ratio of near-zero weights."""
+        W = self.weight.detach()
+        near_zero = torch.abs(W) < threshold
+        return near_zero.float().mean().item()
+    
+    def get_effective_bits(self) -> float:
+        """Estimate effective bits used after quantization."""
+        if not self.quantization_enabled:
+            return 32.0  # Assume float32
+        
+        W_quant = self._quantize_weights().detach()
+        unique_values = torch.unique(W_quant)
+        return torch.log2(torch.tensor(len(unique_values), dtype=torch.float32)).item()
+    
+    def compare_weights(self) -> Dict[str, float]:
+        """Compare original vs quantized weights."""
+        if not self.quantization_enabled:
+            return {'error': 0.0, 'relative_error': 0.0, 'cosine_similarity': 1.0}
+        
+        W_orig = self.weight.detach()
+        W_quant = self._quantize_weights().detach()
+        
+        error = torch.norm(W_orig - W_quant).item()
+        relative_error = error / torch.norm(W_orig).item()
+        cosine_sim = F.cosine_similarity(W_orig.flatten(), W_quant.flatten(), dim=0).item()
+        
+        return {
+            'error': error,
+            'relative_error': relative_error,
+            'cosine_similarity': cosine_sim
+        }
+    
+    def get_weight_clipping_stats(self) -> Dict[str, float]:
+        """Get statistics about weight clipping."""
+        W = self.weight.detach()
+        clipped_count = torch.sum((W.abs() > self.weight_clip_value).float()).item()
+        total_count = W.numel()
+        clipping_ratio = clipped_count / total_count
+        
+        return {
+            'clipping_ratio': clipping_ratio,
+            'clipped_count': clipped_count,
+            'total_count': total_count,
+            'clip_value': self.weight_clip_value,
+            'max_weight': W.abs().max().item()
+        }
+    
+    def get_diagnostic_summary(self) -> Dict[str, Any]:
+        """Get comprehensive diagnostic summary."""
+        summary = {
+            'epoch': self.current_epoch,
+            'quantization_enabled': self.quantization_enabled,
+            'warmup_epochs': self.warmup_epochs,
+            'weight_stats': self.get_weight_statistics(),
+            'quantization_error': self.get_quantization_error(),
+            'effective_bits': self.get_effective_bits(),
+            'sparsity_ratio': self.get_sparsity_ratio(),
+            'weight_clipping': self.get_weight_clipping_stats(),
+        }
+        
+        if self.quantization_enabled:
+            summary['weight_comparison'] = self.compare_weights()
+        
+        return summary
     
     def export_quantized(self):
         """
@@ -406,3 +637,7 @@ class HNLQLinear(nn.Module):
                f'lattice_type={self.lattice_type}, q={self.q}, M={self.M}, ' \
                f'tiling={self.tiling}, block_size={self.block_size}, ' \
                f'quantize_activations={self.quantize_activations}, bias={self.bias is not None}'
+
+
+# Backward compatibility alias
+HNLQLinear = HNLQLinearQAT

@@ -19,10 +19,9 @@ from .e8 import (
 )
 
 # Vector quantization layers
-from .vq_layers import HNLQLinear, LSQActivation, get_generators, ste_quantize
+from .vq_layers import HNLQLinear, HNLQLinearQAT, LSQActivation, get_generators, ste_quantize
 
-# Scalar quantization layers
-from .sq_layers import ScalarQLinear
+# Scalar quantization layers (removed - use core.scalar module instead)
 
 # Note: Scalar configs and utilities available in core.scalar submodule
 
@@ -52,10 +51,10 @@ __all__ = [
     
     # Vector quantization layers
     'HNLQLinear',
+    'HNLQLinearQAT',
     'LSQActivation',
     'get_generators',
     'ste_quantize',
     
-    # Scalar quantization layers
-    'ScalarQLinear',
+    # Scalar quantization layers (removed - use core.scalar module instead)
 ]

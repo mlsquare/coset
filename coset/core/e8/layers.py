@@ -14,19 +14,19 @@ from .codecs import e8_encode, e8_decode
 
 def create_e8_hnlq_linear(in_dim, out_dim, device=None, **kwargs):
     """
-    Convenience function to create HNLQLinear with E8 lattice.
+    Convenience function to create HNLQLinearQAT with E8 lattice.
     
     Args:
         in_dim: Input dimension (must be divisible by 8)
         out_dim: Output dimension
         device: Device to place the layer on (defaults to cuda if available, else CPU)
-        **kwargs: Additional arguments passed to HNLQLinear
+        **kwargs: Additional arguments passed to HNLQLinearQAT
         
     Returns:
-        HNLQLinear instance configured for E8 lattice
+        HNLQLinearQAT instance configured for E8 lattice
     """
     # Import here to avoid circular imports
-    from ..vq_layers import HNLQLinear, get_generators
+    from ..vq_layers import HNLQLinearQAT, get_generators
     from .codecs import e8_quantize
     
     # Ensure input dimension is divisible by 8
@@ -41,7 +41,7 @@ def create_e8_hnlq_linear(in_dim, out_dim, device=None, **kwargs):
     lattice = E8Lattice(device=device)
     G, Ginv = get_generators(lattice)
     
-    # Set default E8 parameters
+    # Set default E8 parameters with QAT defaults
     defaults = {
         'G': G,
         'Ginv': Ginv,
@@ -51,9 +51,12 @@ def create_e8_hnlq_linear(in_dim, out_dim, device=None, **kwargs):
         'q': 4,
         'M': 2,
         'Delta0': 1.5,
+        'warmup_epochs': 0,  # Default: no warmup
+        'enable_diagnostics': False,  # Default: no diagnostics
+        'weight_clip_value': 2.0,  # Default clipping value
     }
     
     # Update with provided kwargs
     defaults.update(kwargs)
     
-    return HNLQLinear(in_dim, out_dim, **defaults)
+    return HNLQLinearQAT(in_dim, out_dim, **defaults)
