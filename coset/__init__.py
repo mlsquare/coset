@@ -16,69 +16,52 @@ Key Features:
 __version__ = "0.1.0"
 __author__ = "Coset Development Team"
 
-# Core imports
-from .lattices import Lattice, Z2Lattice, D4Lattice, E8Lattice
-from .quant import QuantizationConfig, encode, decode, quantize
-from .nn import QLinear
-
-# Optimized lattice modules
-from .optim import (
-    # E8 optimized
-    E8Config,
-    get_e8_config,
-    E8_FAST,
-    E8_ACCURATE,
-    E8_HIGH_COMPRESSION,
-    E8_LOW_DISTORTION,
-    e8_quantize,
-    batch_e8_quantize,
-    e8_encode,
-    e8_decode,
-    batch_e8_encode,
-    batch_e8_decode,
-    E8QLinear,
-    E8StraightThroughQuantize,
-    E8OneSidedLUT,
-    E8TwoSidedLUT,
-    E8LUTManager,
-    e8_quantize_cuda_jit,
-    e8_cuda_available,
-    e8_quantize_cuda_wrapper,
+# Core imports - Essential user-facing API
+from .core import (
+    # Main layers
+    HNLQLinear,
+    ScalarQLinear,
+    # E8 convenience
+    create_e8_hnlq_linear,
+    # STE utilities
+    ste_quantize,
 )
 
+# Legacy imports (deprecated - use core modules instead)
+import warnings
+warnings.warn(
+    "Legacy modules (lattices, nn, quant) are deprecated. Use core modules instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
+from .legacy.lattices import Lattice, Z2Lattice, D4Lattice, E8Lattice
+from .legacy.quant import (
+    QuantizationConfig,
+    encode as legacy_encode,
+    decode as legacy_decode,
+    quantize as legacy_quantize
+)
+from .legacy.nn import QLinear
+
+# Re-export legacy functions with their original names for backward compatibility
+# Note: Core 'quantize' takes precedence
+encode = legacy_encode
+decode = legacy_decode
+
 __all__ = [
-    # Core lattice classes
+    # Core functionality (recommended)
+    "HNLQLinear",
+    "ScalarQLinear",
+    "create_e8_hnlq_linear",
+    "ste_quantize",
+    
+    # Legacy functionality (deprecated)
     "Lattice",
     "Z2Lattice", 
     "D4Lattice",
     "E8Lattice",
-    
-    # Generic quantization
     "QuantizationConfig",
     "encode",
-    "decode", 
-    "quantize",
+    "decode",
     "QLinear",
-    
-    # E8 optimized
-    "E8Config",
-    "get_e8_config",
-    "E8_FAST",
-    "E8_ACCURATE",
-    "E8_HIGH_COMPRESSION",
-    "E8_LOW_DISTORTION",
-    "e8_quantize",
-    "batch_e8_quantize",
-    "e8_encode",
-    "e8_decode",
-    "batch_e8_encode",
-    "batch_e8_decode",
-    "E8QLinear",
-    "E8StraightThroughQuantize",
-    "E8OneSidedLUT",
-    "E8TwoSidedLUT",
-    "E8LUTManager",
-    "e8_quantize_cuda_jit",
-    "e8_cuda_available",
-    "e8_quantize_cuda_wrapper",
 ]

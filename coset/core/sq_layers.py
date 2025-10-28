@@ -1,52 +1,47 @@
 """
-E8 Lattice Layers Module
+Scalar Quantized Linear Layers
 
-This module provides optimized neural network layers specifically for E8 lattice
-quantization, including the E8QLinear layer with straight-through estimation.
+This module provides scalar quantized linear layers with straight-through
+estimation for quantization-aware training.
 """
 
 import torch
 import torch.nn as nn
 from typing import Optional
-from ...lattices import E8Lattice
-from .config import E8Config
-from .codecs import batch_e8_quantize
-from .cuda import e8_quantize_cuda_jit, e8_cuda_available
+from .scalar.config import ScalarConfig
+from .scalar.quantizers import scalar_quantize, batch_scalar_quantize
 
 
-class E8StraightThroughQuantize(torch.autograd.Function):
+class ScalarStraightThroughQuantize(torch.autograd.Function):
     """
-    Straight-Through Estimator for E8 quantization with per-row scaling.
+    Straight-Through Estimator for scalar quantization with per-row scaling.
     
-    This implements QAT with proper handling of weight norms for E8 lattice quantization:
+    This implements QAT with proper handling of weight norms for scalar quantization:
     
     For an n x m weight matrix:
-    1. Compute L2 norm of each of the n original rows (before tiling) and store them.
-    2. Tile the matrix to have 8-column structure (E8 dimension)
-    3. Scale each tiled row such that the norm of each tiled row has unit norm 
-    4. Add another scaling beta such that E8 quantization is not overloaded
-    5. Beta is pre-computed and stored in the config, which is specific to E8 and q
-    6. Quantize the normalized tiled matrix using optimized batch_quantize_e8
-    7. Re-scale back by the same n scaling factors and the beta scaling factor
-    8. Reshape back to original shape
+    1. Compute L2 norm of each of the n original rows and store them.
+    2. Reshape the matrix to have block_size structure (if block_size is specified)
+    3. Scale each row such that the norm of each row has unit norm 
+    4. Apply additional scaling factor if provided
+    5. Quantize the normalized matrix using scalar quantization
+    6. Re-scale back by the same n scaling factors
     
     This ensures:
-    - Each row of the tiled matrix has unit norm before quantization (stable)
-    - Only n scaling factors needed (not n*m/8 factors)
+    - Each row has unit norm before quantization (stable)
+    - Only n scaling factors needed (not n*m/block_size factors)
     - STE is well-behaved with gradients flowing properly to FP32 weights
-    - Uses optimized E8 batch quantization for better performance
+    - Uses optimized scalar quantization for better performance
     """
     
     @staticmethod
-    def forward(ctx, input, lattice, config, scale_factor=None):
+    def forward(ctx, input, config, scale_factor=None):
         """
-        Forward pass: quantize the input with per-row scaling using E8 optimization.
+        Forward pass: quantize the input with per-row scaling using scalar quantization.
         
         Args:
             ctx: Context object to store information for backward
             input: Input tensor to quantize (can be reshaped to 2D matrix)
-            lattice: E8Lattice instance
-            config: E8 quantization configuration
+            config: ScalarConfig instance
             scale_factor: Optional manual scale factor. If None, uses automatic scaling.
             
         Returns:
@@ -54,7 +49,6 @@ class E8StraightThroughQuantize(torch.autograd.Function):
         """
         # Store for backward
         ctx.original_shape = input.shape
-        ctx.lattice = lattice
         ctx.config = config
         device = input.device
         
@@ -65,18 +59,16 @@ class E8StraightThroughQuantize(torch.autograd.Function):
             # Flatten all but the last dimension to rows
             input_2d = input.view(-1, input.shape[-1])
         
-        # Step 1: Compute L2 norm of each original row (before tiling)
+        # Step 1: Compute L2 norm of each original row (before blocking)
         row_norms = torch.norm(input_2d, p=2, dim=1, keepdim=True)  # [num_rows, 1]
         # Avoid division by zero
         row_norms_safe = torch.clamp(row_norms, min=1e-8)
         ctx.row_norms = row_norms
         
         # Step 2: Rescale each row to unit norm and apply scaling factor
-        beta = config.beta
         if scale_factor is None:
             # Use automatic scaling logic
-            # Scale up significantly to reach E8 quantization threshold (around 2.0)
-            # Since normalized values are around 0.035, we need scale_factor ~60 to reach 2.0
+            # Scale up significantly to reach quantization threshold
             # Use a more conservative adaptive scaling that accounts for matrix size
             base_scale = 60.0  # Base scale factor that works well
             adaptive_factor = min(2.0, max(0.5, input_2d.shape[0] / 10000))  # Adaptive factor between 0.5-2.0
@@ -88,24 +80,27 @@ class E8StraightThroughQuantize(torch.autograd.Function):
         ctx.scale_factor = scale_factor  # Store for backward pass
         input_2d = (input_2d / row_norms_safe) * scale_factor
         
-        # Step 3: Tile the matrix to have 8-column structure (E8)
-        input_2d = input_2d.view(-1, 8)  # [num_tiles, 8]
+        # Step 3: Apply scalar quantization
+        # Create a temporary config with the scale factor
+        temp_config = ScalarConfig(
+            q=config.q,
+            M=config.M,
+            mode=config.mode,
+            block_size=config.block_size,
+            per_row_scaling=False,  # We handle scaling manually
+            scale_factor=None,  # We handle scaling manually
+            asymmetric_method=config.asymmetric_method,
+            with_dither=config.with_dither,
+            with_tie_dither=config.with_tie_dither,
+        )
         
-        # Step 4: Quantize using optimized E8 batch quantization (CUDA if available)
-        if device.type == 'cuda' and e8_cuda_available():
-            try:
-                # Use JIT-compiled CUDA kernel for quantization
-                quantized = e8_quantize_cuda_jit(input_2d, device=device)
-            except:
-                # Fallback to PyTorch GPU implementation
-                quantized = batch_e8_quantize(input_2d, device=device)
-        else:
-            quantized = batch_e8_quantize(input_2d, device=device)
+        # Quantize
+        quantized = scalar_quantize(input_2d, temp_config)
         
-        # Step 5: Reshape back to original shape
+        # Step 4: Reshape back to original shape
         quantized = quantized.view(ctx.original_shape)
         
-        # Step 6: Scale back by the original row norms
+        # Step 5: Scale back by the original row norms
         quantized = quantized * row_norms_safe / ctx.scale_factor
         
         return quantized
@@ -117,81 +112,82 @@ class E8StraightThroughQuantize(torch.autograd.Function):
         
         Gradients pass through unchanged as if no quantization occurred.
         """
-        return grad_output, None, None, None
+        return grad_output, None, None
 
 
-class E8QLinear(nn.Module):
+class ScalarQLinear(nn.Module):
     """
-    E8-optimized quantized linear layer with hierarchical nested-lattice quantization.
+    Scalar quantized linear layer with hierarchical nested-lattice quantization.
     
-    This layer maintains FP32 shadow weights and can quantize weights,
-    activations, or both during training. It uses optimized E8 batch quantization
-    for better performance on both CPU and GPU.
+    This layer implements quantization-aware training (QAT) for scalar quantization
+    with support for both symmetric and asymmetric quantization modes.
     
-    Attributes:
-        in_features: Number of input features
-        out_features: Number of output features
-        config: E8 quantization configuration
-        lattice: E8Lattice instance for quantization
-        quantize_weights: Whether to quantize weights
-        quantize_activations: Whether to quantize activations
-        quantize_every: Frequency of quantization (1 = every step)
-        use_lut: Whether to use lookup table for matrix multiplication
+    Features:
+    - Per-row L2 norm scaling for stable quantization
+    - Block-based quantization with configurable block size
+    - Vector weight detection (skips quantization for single input/output features)
+    - Padding for dimensions not divisible by block_size
+    - Manual scale factor override
+    - Straight-through estimation for gradients
     """
     
     def __init__(
         self,
         in_features: int,
         out_features: int,
-        config: E8Config,
-        lattice: Optional[E8Lattice] = None,
+        config: ScalarConfig,
         quantize_weights: bool = True,
         quantize_activations: bool = False,
         quantize_every: int = 1,
-        use_lut: bool = False,
         bias: bool = True,
-        scale_factor: Optional[float] = None
+        scale_factor: Optional[float] = None,
+        matrix_level_quantization: bool = True
     ):
         """
-        Initialize the E8-optimized quantized linear layer.
+        Initialize the scalar quantized linear layer.
         
         Args:
             in_features: Number of input features
             out_features: Number of output features
-            config: E8 quantization configuration
-            lattice: E8Lattice instance (defaults to E8Lattice)
+            config: ScalarConfig instance
             quantize_weights: Whether to quantize weights
             quantize_activations: Whether to quantize activations
             quantize_every: Frequency of quantization (1 = every step)
-            use_lut: Whether to use lookup table for matrix multiplication
             bias: Whether to include bias term
             scale_factor: Optional manual scale factor for quantization. If None, uses automatic scaling.
+            matrix_level_quantization: Whether to use matrix-level quantization (default: True)
         """
         super().__init__()
         
         self.in_features = in_features
         self.out_features = out_features
-        self.config = config
-        self.lattice = lattice if lattice is not None else E8Lattice()
         self.quantize_weights = quantize_weights
         self.quantize_activations = quantize_activations
         self.quantize_every = quantize_every
-        self.use_lut = use_lut
         self.scale_factor = scale_factor
+        self.matrix_level_quantization = matrix_level_quantization
+        
+        # Create a modified config with matrix-level quantization enabled if requested
+        if matrix_level_quantization:
+            from dataclasses import replace
+            self.config = replace(config, matrix_level_quantization=True)
+        else:
+            self.config = config
         
         # Handle edge cases
         self._is_vector_weight = (in_features == 1 or out_features == 1)
         self._input_padding = 0
         self._output_padding = 0
         
-        # Calculate padding for dimensions not divisible by 8
-        if in_features % 8 != 0:
-            self._input_padding = 8 - (in_features % 8)
-            print(f"Warning: Input features {in_features} not divisible by 8, padding with {self._input_padding} zeros")
-        
-        if out_features % 8 != 0:
-            self._output_padding = 8 - (out_features % 8)
-            print(f"Warning: Output features {out_features} not divisible by 8, padding with {self._output_padding} zeros")
+        # Calculate padding for dimensions not divisible by block_size
+        if config.block_size is not None:
+            if in_features % config.block_size != 0:
+                self._input_padding = config.block_size - (in_features % config.block_size)
+                print(f"Warning: Input features {in_features} not divisible by block_size {config.block_size}, padding with {self._input_padding} zeros")
+            
+            if out_features % config.block_size != 0:
+                self._output_padding = config.block_size - (out_features % config.block_size)
+                print(f"Warning: Output features {out_features} not divisible by block_size {config.block_size}, padding with {self._output_padding} zeros")
         
         # Calculate effective dimensions (after padding)
         effective_in_features = in_features + self._input_padding
@@ -211,13 +207,7 @@ class E8QLinear(nn.Module):
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Forward pass with optional E8 quantization.
-        
-        Args:
-            x: Input tensor of shape [batch_size, in_features]
-            
-        Returns:
-            Output tensor of shape [batch_size, out_features]
+        Forward pass with optional scalar quantization.
         """
         # Add input padding if needed
         if self._input_padding > 0:
@@ -245,18 +235,26 @@ class E8QLinear(nn.Module):
     
     def _standard_forward(self, x: torch.Tensor) -> torch.Tensor:
         """Standard forward pass without quantization."""
-        return torch.nn.functional.linear(x, self.weight, self.bias)
+        # Get weight on the same device as x
+        weight = self.weight.to(x.device)
+        bias = self.bias.to(x.device) if self.bias is not None else None
+        
+        # Perform matrix multiplication
+        output = torch.nn.functional.linear(x, weight, bias)
+        
+        # Increment step counter
+        self._step_count += 1
+        
+        return output
     
     def _quantized_forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Forward pass with E8 quantization and straight-through estimation.
-        
-        Uses optimized batch_e8_quantize for better performance.
+        Forward pass with scalar quantization and straight-through estimation.
         """
         # Quantize weights if enabled (with STE)
         if self.quantize_weights:
-            weight_quantized = E8StraightThroughQuantize.apply(
-                self.weight, self.lattice, self.config, self.scale_factor
+            weight_quantized = ScalarStraightThroughQuantize.apply(
+                self.weight, self.config, self.scale_factor
             )
         else:
             weight_quantized = self.weight
@@ -266,8 +264,8 @@ class E8QLinear(nn.Module):
         
         # Quantize activations if enabled (with STE)
         if self.quantize_activations:
-            x_quantized = E8StraightThroughQuantize.apply(
-                x, self.lattice, self.config, self.scale_factor
+            x_quantized = ScalarStraightThroughQuantize.apply(
+                x, self.config, self.scale_factor
             )
         else:
             x_quantized = x
@@ -276,26 +274,12 @@ class E8QLinear(nn.Module):
         bias = self.bias.to(x.device) if self.bias is not None else None
         
         # Perform matrix multiplication
-        if self.use_lut:
-            output = self._lut_matmul(x_quantized, weight_quantized)
-        else:
-            output = torch.nn.functional.linear(x_quantized, weight_quantized, bias)
+        output = torch.nn.functional.linear(x_quantized, weight_quantized, bias)
         
         # Increment step counter
         self._step_count += 1
         
         return output
-    
-    def _lut_matmul(self, x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
-        """
-        Matrix multiplication using lookup tables.
-        
-        This is a placeholder implementation. In practice, this would use
-        precomputed lookup tables for efficient inner product computation.
-        """
-        # For now, fall back to standard matrix multiplication
-        # TODO: Implement actual LUT-based matrix multiplication
-        return torch.nn.functional.linear(x, weight, self.bias)
     
     def get_quantization_stats(self) -> dict:
         """Get statistics about quantization."""
@@ -304,12 +288,12 @@ class E8QLinear(nn.Module):
             "quantize_weights": self.quantize_weights,
             "quantize_activations": self.quantize_activations,
             "quantize_every": self.quantize_every,
-            "use_lut": self.use_lut,
-            "lattice_type": "E8",
+            "quantization_type": "scalar",
             "is_vector_weight": self._is_vector_weight,
             "input_padding": self._input_padding,
             "output_padding": self._output_padding,
             "scale_factor": self.scale_factor,
+            "matrix_level_quantization": self.matrix_level_quantization,
             "config": self.config.to_dict(),
         }
     
@@ -324,11 +308,14 @@ class E8QLinear(nn.Module):
         if self._input_padding > 0 or self._output_padding > 0:
             padding_info = f", padding=({self._input_padding},{self._output_padding})"
         scale_info = f", scale_factor={self.scale_factor}" if self.scale_factor is not None else ""
+        mode_info = f", mode={self.config.mode}"
+        block_info = f", block_size={self.config.block_size}" if self.config.block_size is not None else ""
+        matrix_info = f", matrix_level={self.matrix_level_quantization}"
         
         return (
             f"in_features={self.in_features}, out_features={self.out_features}, "
-            f"bias={self.bias is not None}, lattice=E8, "
+            f"bias={self.bias is not None}, quantization=scalar, "
             f"quantize_weights={self.quantize_weights}, "
             f"quantize_activations={self.quantize_activations}, "
-            f"quantize_every={self.quantize_every}{vector_info}{padding_info}{scale_info}"
+            f"quantize_every={self.quantize_every}{vector_info}{padding_info}{scale_info}{mode_info}{block_info}{matrix_info}"
         )

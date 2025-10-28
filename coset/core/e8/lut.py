@@ -9,29 +9,40 @@ import torch
 import numpy as np
 from typing import Optional, Dict, Tuple
 from ...lattices import E8Lattice
-from .config import E8Config
 
 
 class E8OneSidedLUT:
     """
-    One-sided lookup table for E8 lattice operations.
+    EXPERIMENTAL: One-sided lookup table for E8 lattice operations.
+    
+    ⚠️  WARNING: This class is experimental and not supported.
+    Use HNLQLinear from coset.optim.layers for production use.
     
     Stores precomputed inner products between lattice points and a fixed vector,
     enabling fast lookup-based matrix multiplication.
     """
     
-    def __init__(self, config: E8Config, lattice: Optional[E8Lattice] = None):
+    def __init__(self, q: int = 4, M: int = 2, beta: float = 0.3, lattice: Optional[E8Lattice] = None):
         """
         Initialize E8 one-sided LUT.
         
         Args:
-            config: E8 quantization configuration
+            q: Quantization parameter (alphabet size)
+            M: Number of hierarchical levels
+            beta: Scaling parameter for quantization
             lattice: E8Lattice instance (defaults to E8Lattice)
         """
-        self.config = config
+        import warnings
+        warnings.warn(
+            "E8OneSidedLUT is experimental and not supported. Use HNLQLinear from coset.optim.layers for production use.",
+            UserWarning,
+            stacklevel=2
+        )
+        
+        self.q = q
+        self.M = M
+        self.beta = beta
         self.lattice = lattice if lattice is not None else E8Lattice()
-        self.q = config.q
-        self.M = config.M
         self.d = 8  # E8 dimension
         
         # Cache for LUTs
@@ -129,24 +140,36 @@ class E8OneSidedLUT:
 
 class E8TwoSidedLUT:
     """
-    Two-sided lookup table for E8 lattice operations.
+    EXPERIMENTAL: Two-sided lookup table for E8 lattice operations.
+    
+    ⚠️  WARNING: This class is experimental and not supported.
+    Use HNLQLinear from coset.optim.layers for production use.
     
     Stores precomputed inner products between all pairs of lattice points,
     enabling fast lookup-based operations.
     """
     
-    def __init__(self, config: E8Config, lattice: Optional[E8Lattice] = None):
+    def __init__(self, q: int = 4, M: int = 2, beta: float = 0.3, lattice: Optional[E8Lattice] = None):
         """
         Initialize E8 two-sided LUT.
         
         Args:
-            config: E8 quantization configuration
+            q: Quantization parameter (alphabet size)
+            M: Number of hierarchical levels
+            beta: Scaling parameter for quantization
             lattice: E8Lattice instance (defaults to E8Lattice)
         """
-        self.config = config
+        import warnings
+        warnings.warn(
+            "E8TwoSidedLUT is experimental and not supported. Use HNLQLinear from coset.optim.layers for production use.",
+            UserWarning,
+            stacklevel=2
+        )
+        
+        self.q = q
+        self.M = M
+        self.beta = beta
         self.lattice = lattice if lattice is not None else E8Lattice()
-        self.q = config.q
-        self.M = config.M
         self.d = 8  # E8 dimension
         
         # Cache for LUT
@@ -246,24 +269,38 @@ class E8TwoSidedLUT:
 
 class E8LUTManager:
     """
-    Manager for E8 lattice lookup tables.
+    EXPERIMENTAL: Manager for E8 lattice lookup tables.
+    
+    ⚠️  WARNING: This class is experimental and not supported.
+    Use HNLQLinear from coset.optim.layers for production use.
     
     Provides a unified interface for managing both one-sided and two-sided LUTs
     with automatic caching and memory management.
     """
     
-    def __init__(self, config: E8Config, lattice: Optional[E8Lattice] = None):
+    def __init__(self, q: int = 4, M: int = 2, beta: float = 0.3, lattice: Optional[E8Lattice] = None):
         """
         Initialize E8 LUT manager.
         
         Args:
-            config: E8 quantization configuration
+            q: Quantization parameter (alphabet size)
+            M: Number of hierarchical levels
+            beta: Scaling parameter for quantization
             lattice: E8Lattice instance (defaults to E8Lattice)
         """
-        self.config = config
+        import warnings
+        warnings.warn(
+            "E8LUTManager is experimental and not supported. Use HNLQLinear from coset.optim.layers for production use.",
+            UserWarning,
+            stacklevel=2
+        )
+        
+        self.q = q
+        self.M = M
+        self.beta = beta
         self.lattice = lattice if lattice is not None else E8Lattice()
-        self.one_sided_lut = E8OneSidedLUT(config, lattice)
-        self.two_sided_lut = E8TwoSidedLUT(config, lattice)
+        self.one_sided_lut = E8OneSidedLUT(q, M, beta, lattice)
+        self.two_sided_lut = E8TwoSidedLUT(q, M, beta, lattice)
     
     def get_one_sided_lut(self, vector: torch.Tensor, device: torch.device = None) -> torch.Tensor:
         """
