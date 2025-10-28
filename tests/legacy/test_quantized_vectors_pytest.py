@@ -8,9 +8,9 @@ to ensure zero reconstruction error for vectors already in the quantized space.
 import pytest
 import torch
 import numpy as np
-from coset.lattices import Z2Lattice, D4Lattice, E8Lattice
-from coset.quant import QuantizationConfig, encode, decode, quantize
-from coset.quant.sim import LatticeVectorSimulator, create_simulator
+from coset.legacy.lattices import Z2Lattice, D4Lattice, E8Lattice
+from coset.legacy.quant import QuantizationConfig, encode, decode, quantize
+from coset.legacy.quant.sim import LatticeVectorSimulator, create_simulator
 
 
 # Test configurations as tuples

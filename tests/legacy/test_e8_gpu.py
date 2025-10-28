@@ -11,15 +11,15 @@ Tests cover:
 import pytest
 import torch
 import numpy as np
-from coset.lattices import E8Lattice
-from coset.quant import (
+from coset.legacy.lattices import E8Lattice
+from coset.legacy.quant import (
     QuantizationConfig,
     batch_e8_quantize,
     batch_encode_e8,
     batch_decode_e8,
     batch_quantize_e8
 )
-from coset.quant.functional import encode, decode, quantize
+from coset.legacy.quant.functional import encode, decode, quantize
 
 
 @pytest.fixture

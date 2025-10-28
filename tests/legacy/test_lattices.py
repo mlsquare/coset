@@ -8,7 +8,7 @@ and basic lattice operations.
 import pytest
 import torch
 import numpy as np
-from coset.lattices import Z2Lattice, D4Lattice, E8Lattice
+from coset.legacy.lattices import Z2Lattice, D4Lattice, E8Lattice
 
 
 class TestZ2Lattice:

@@ -8,8 +8,8 @@ algorithms.
 import pytest
 import torch
 import numpy as np
-from coset.quant import QuantizationConfig, encode, decode, quantize, mac_modq, accumulate_modq
-from coset.lattices import Z2Lattice, D4Lattice
+from coset.legacy.quant import QuantizationConfig, encode, decode, quantize, mac_modq, accumulate_modq
+from coset.legacy.lattices import Z2Lattice, D4Lattice
 
 
 class TestQuantizationConfig:

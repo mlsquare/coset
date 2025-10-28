@@ -13,10 +13,10 @@ import numpy as np
 import time
 from typing import List
 
-from coset.lattices import Z2Lattice, D4Lattice, E8Lattice
-from coset.quant import QuantizationConfig, encode, decode, quantize
-from coset.quant.vlut import vLUTManager, _encoding_to_index
-from coset.quant.sim import LatticeVectorSimulator, create_simulator
+from coset.legacy.lattices import Z2Lattice, D4Lattice, E8Lattice
+from coset.legacy.quant import QuantizationConfig, encode, decode, quantize
+from coset.legacy.quant.vlut import vLUTManager, _encoding_to_index
+from coset.legacy.quant.sim import LatticeVectorSimulator, create_simulator
 
 
 def compute_vlut_dot_product(encodings: torch.Tensor, vlut: torch.Tensor, 

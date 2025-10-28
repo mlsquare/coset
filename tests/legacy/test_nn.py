@@ -8,9 +8,9 @@ with PyTorch's autograd system.
 import pytest
 import torch
 import torch.nn as nn
-from coset.nn import QLinear
-from coset.quant import QuantizationConfig
-from coset.lattices import Z2Lattice, D4Lattice
+from coset.legacy.nn import QLinear
+from coset.legacy.quant import QuantizationConfig
+from coset.legacy.lattices import Z2Lattice, D4Lattice
 
 
 class TestQLinear:
