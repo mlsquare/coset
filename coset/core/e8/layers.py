@@ -19,7 +19,7 @@ def create_e8_hnlq_linear(in_dim, out_dim, device=None, **kwargs):
     Args:
         in_dim: Input dimension (must be divisible by 8)
         out_dim: Output dimension
-        device: Device to place the layer on (defaults to CPU)
+        device: Device to place the layer on (defaults to cuda if available, else CPU)
         **kwargs: Additional arguments passed to HNLQLinear
         
     Returns:
@@ -32,6 +32,10 @@ def create_e8_hnlq_linear(in_dim, out_dim, device=None, **kwargs):
     # Ensure input dimension is divisible by 8
     if in_dim % 8 != 0:
         raise ValueError(f"Input dimension {in_dim} must be divisible by 8 for E8 lattice")
+    
+    # Default to cuda if available and device not specified
+    if device is None:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     # Create E8 lattice and get generators
     lattice = E8Lattice(device=device)

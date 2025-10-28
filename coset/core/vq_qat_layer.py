@@ -1,15 +1,21 @@
 """
-Vector Quantization Layers
+Vector Quantization Layers with QAT Cold Start
 
 This module provides vector quantization layers with hierarchical nested lattice quantization (HNLQ)
-and learnable scale quantization (LSQ) for quantization-aware training.
+and learnable scale quantization (LSQ) for quantization-aware training with cold start support.
+
+Features:
+- Cold start (warmup) training: Train without quantization for specified epochs
+- Weight diagnostics: Quantile statistics, quantization error analysis
+- Epoch tracking: Automatic quantization enable/disable based on epoch
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Optional, Union, Dict, Any
+from typing import Optional, Union, Dict, Any, List, Tuple
 from dataclasses import dataclass
+import numpy as np
 
 def ste_round(x):
     """Straight-through estimator for rounding."""
@@ -155,19 +161,21 @@ class HNLQConfig:
             raise ValueError(f"block_size must be positive, got {self.block_size}")
 
 
-class HNLQLinear(nn.Module):
+class HNLQLinearQAT(nn.Module):
     """
-    Hierarchical Nested Lattice Quantization Linear Layer.
+    Hierarchical Nested Lattice Quantization Linear Layer with QAT Cold Start.
     
     This layer implements quantization-aware training with hierarchical nested lattice quantization
-    for the weights and optional activation quantization using LSQ.
+    for the weights and optional activation quantization using LSQ, with cold start support.
     
     The layer supports:
+    - Cold start (warmup) training: Train without quantization for specified epochs
     - Learnable scaling factors (beta) for weights
     - Flexible tiling (row-level or block-level scaling)
     - Optional activation quantization
     - Multiple lattice types (E8, D4, etc.)
     - Various weight initialization methods
+    - Weight diagnostics and quantization analysis
     
     Args:
         in_features: Input dimension
@@ -189,6 +197,8 @@ class HNLQLinear(nn.Module):
         init_method: Weight initialization method
         init_kwargs: Additional arguments for weight initialization
         bias: Whether to use bias
+        warmup_epochs: Number of epochs to train without quantization (cold start)
+        enable_diagnostics: Whether to enable weight diagnostics
     """
     
     def __init__(
@@ -211,7 +221,9 @@ class HNLQLinear(nn.Module):
         act_init_alpha: float = 1.0,
         init_method: str = 'normal',
         init_kwargs: Optional[Dict[str, Any]] = None,
-        bias: bool = True
+        bias: bool = True,
+        warmup_epochs: int = 0,
+        enable_diagnostics: bool = False
     ):
         super().__init__()
         
@@ -263,6 +275,16 @@ class HNLQLinear(nn.Module):
             self.actq = LSQActivation(bit_width=act_bit_width, init_alpha=act_init_alpha)
         else:
             self.actq = None
+        
+        # Cold start (QAT warmup) parameters
+        self.warmup_epochs = warmup_epochs
+        self.current_epoch = 0
+        self.quantization_enabled = warmup_epochs == 0  # Enable quantization immediately if no warmup
+        self.enable_diagnostics = enable_diagnostics
+        
+        # Diagnostic storage
+        self._weight_history = [] if enable_diagnostics else None
+        self._quantization_errors = [] if enable_diagnostics else None
     
     def _initialize_weights(self):
         """Initialize weights using the specified method."""
@@ -320,6 +342,12 @@ class HNLQLinear(nn.Module):
         """Quantize weights using hierarchical nested lattice quantization."""
         W = self.weight  # [out_dim, in_dim]
         
+        # Cold start: return original weights if quantization is disabled
+        if not self.quantization_enabled:
+            if self.enable_diagnostics:
+                self._weight_history.append(W.detach().clone())
+            return W
+        
         # Reshape to blocks
         W_blocks = W.view(self.out_features, self.blocks_per_row, self.block_size)  # [out_dim, blocks_per_row, block_size]
         
@@ -353,6 +381,11 @@ class HNLQLinear(nn.Module):
         # Reshape to original weight shape
         W_quantized = W_quantized.reshape(self.out_features, self.in_features)
         
+        # Store diagnostics if enabled
+        if self.enable_diagnostics:
+            self._weight_history.append(W.detach().clone())
+            self._quantization_errors.append(torch.norm(W - W_quantized).item())
+        
         return W_quantized
     
     def forward(self, x):
@@ -368,6 +401,124 @@ class HNLQLinear(nn.Module):
             x = self.actq(x)
         
         return x
+    
+    # Cold start control methods
+    def update_epoch(self, epoch: int):
+        """Update current epoch and enable quantization if warmup is complete."""
+        self.current_epoch = epoch
+        if epoch >= self.warmup_epochs and not self.quantization_enabled:
+            self.quantization_enabled = True
+            print(f"Epoch {epoch}: Enabling quantization (warmup complete)")
+    
+    def enable_quantization(self):
+        """Manually enable quantization."""
+        self.quantization_enabled = True
+        print("Quantization manually enabled")
+    
+    def disable_quantization(self):
+        """Manually disable quantization."""
+        self.quantization_enabled = False
+        print("Quantization manually disabled")
+    
+    def is_quantization_enabled(self) -> bool:
+        """Check if quantization is currently enabled."""
+        return self.quantization_enabled
+    
+    # Weight diagnostic methods
+    def get_weight_quantiles(self, quantiles: List[float] = None) -> torch.Tensor:
+        """Get quantiles of the current weight matrix."""
+        if quantiles is None:
+            quantiles = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+        
+        W = self.weight.detach().flatten()
+        return torch.quantile(W, torch.tensor(quantiles, device=W.device))
+    
+    def get_weight_statistics(self) -> Dict[str, float]:
+        """Get comprehensive statistics of the current weight matrix."""
+        W = self.weight.detach()
+        return {
+            'mean': W.mean().item(),
+            'std': W.std().item(),
+            'min': W.min().item(),
+            'max': W.max().item(),
+            'median': W.median().item(),
+            'l2_norm': torch.norm(W).item(),
+            'l1_norm': torch.norm(W, p=1).item(),
+        }
+    
+    def get_quantization_error(self) -> float:
+        """Get L2 quantization error between original and quantized weights."""
+        if not self.quantization_enabled:
+            return 0.0
+        
+        W_orig = self.weight.detach()
+        W_quant = self._quantize_weights().detach()
+        return torch.norm(W_orig - W_quant).item()
+    
+    def get_scaling_factors(self) -> torch.Tensor:
+        """Get current scaling factors (theta_beta)."""
+        return self.theta_beta.detach()
+    
+    def get_quantization_histogram(self, bins: int = 50) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Get histogram of quantized weight values."""
+        if not self.quantization_enabled:
+            W = self.weight.detach()
+        else:
+            W = self._quantize_weights().detach()
+        
+        W_flat = W.flatten()
+        hist, bin_edges = torch.histogram(W_flat, bins=bins)
+        return hist, bin_edges
+    
+    def get_sparsity_ratio(self, threshold: float = 1e-6) -> float:
+        """Get ratio of near-zero weights."""
+        W = self.weight.detach()
+        near_zero = torch.abs(W) < threshold
+        return near_zero.float().mean().item()
+    
+    def get_effective_bits(self) -> float:
+        """Estimate effective bits used after quantization."""
+        if not self.quantization_enabled:
+            return 32.0  # Assume float32
+        
+        W_quant = self._quantize_weights().detach()
+        unique_values = torch.unique(W_quant)
+        return torch.log2(torch.tensor(len(unique_values), dtype=torch.float32)).item()
+    
+    def compare_weights(self) -> Dict[str, float]:
+        """Compare original vs quantized weights."""
+        if not self.quantization_enabled:
+            return {'error': 0.0, 'relative_error': 0.0, 'cosine_similarity': 1.0}
+        
+        W_orig = self.weight.detach()
+        W_quant = self._quantize_weights().detach()
+        
+        error = torch.norm(W_orig - W_quant).item()
+        relative_error = error / torch.norm(W_orig).item()
+        cosine_sim = F.cosine_similarity(W_orig.flatten(), W_quant.flatten(), dim=0).item()
+        
+        return {
+            'error': error,
+            'relative_error': relative_error,
+            'cosine_similarity': cosine_sim
+        }
+    
+    def get_diagnostic_summary(self) -> Dict[str, Any]:
+        """Get comprehensive diagnostic summary."""
+        summary = {
+            'epoch': self.current_epoch,
+            'quantization_enabled': self.quantization_enabled,
+            'warmup_epochs': self.warmup_epochs,
+            'weight_stats': self.get_weight_statistics(),
+            'quantization_error': self.get_quantization_error(),
+            'effective_bits': self.get_effective_bits(),
+            'sparsity_ratio': self.get_sparsity_ratio(),
+        }
+        
+        if self.quantization_enabled:
+            summary['weight_comparison'] = self.compare_weights()
+        
+        return summary
     
     def export_quantized(self):
         """

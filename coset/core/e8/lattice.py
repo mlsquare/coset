@@ -27,6 +27,7 @@ class E8Lattice(Lattice):
             device: Device to place the generator matrix on
             config: Optional lattice configuration
         """
+        # Create G tensor directly on target device to avoid CPU-GPU transfer
         G = torch.tensor([
             [2, 0, 0, 0, 0, 0, 0, 0],
             [-1, 1, 0, 0, 0, 0, 0, 0],
@@ -36,7 +37,7 @@ class E8Lattice(Lattice):
             [0, 0, 0, 0, -1, 1, 0, 0],
             [0, 0, 0, 0, 0, -1, 1, 0],
             [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5],
-        ], dtype=torch.float32).T
+        ], dtype=torch.float32, device=device).T
         super().__init__(G, "E8", device=device, config=config)
     
     def g_x(self, x: torch.Tensor) -> torch.Tensor:
@@ -119,14 +120,16 @@ class E8Lattice(Lattice):
         )
         
         # Find closest point in D₈ + (0.5)⁸
-        f_x_shifted = self.custom_round(x - 0.5)
-        g_x_shifted = self.g_x(x - 0.5)
+        # Ensure 0.5 constant is on the same device as input
+        half = torch.tensor(0.5, device=x.device, dtype=x.dtype)
+        f_x_shifted = self.custom_round(x - half)
+        g_x_shifted = self.g_x(x - half)
         sum_parity_shifted = torch.sum(f_x_shifted, dim=-1) % 2
         
         y_1 = torch.where(
             (sum_parity_shifted == 0).unsqueeze(-1) if x.dim() > 1 else (sum_parity_shifted == 0),
-            f_x_shifted + 0.5,
-            g_x_shifted + 0.5
+            f_x_shifted + half,
+            g_x_shifted + half
         )
         
         # Return the closer point
