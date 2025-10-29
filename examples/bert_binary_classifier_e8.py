@@ -23,7 +23,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
-    from coset.core.vq_layers import HNLQLinearQAT
+    from coset.core.layers import HNLQLinearQAT
     from coset.core.base import LatticeConfig
     from coset.core.e8.lattice import E8Lattice
     from coset.core.e8.layers import create_e8_hnlq_linear

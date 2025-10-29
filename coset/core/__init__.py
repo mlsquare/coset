@@ -19,7 +19,7 @@ from .e8 import (
 )
 
 # Vector quantization layers
-from .vq_layers import HNLQLinear, HNLQLinearQAT, LSQActivation, get_generators, ste_quantize
+from .layers import HNLQLinear, HNLQLinearQAT, LSQActivation, get_generators, ste_quantize
 
 # Scalar quantization layers (removed - use core.scalar module instead)
 

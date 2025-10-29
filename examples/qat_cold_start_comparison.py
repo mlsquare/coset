@@ -24,7 +24,7 @@ try:
     from coset.core import HNLQLinear
     from coset.core.base import LatticeConfig
     from coset.core.e8 import E8Lattice, create_e8_hnlq_linear
-    from coset.core.vq_layers import HNLQLinearQAT
+    from coset.core.layers import HNLQLinearQAT
     print("✓ Successfully imported coset core modules")
 except ImportError as e:
     print(f"✗ Failed to import coset core modules: {e}")

@@ -26,7 +26,7 @@ def create_e8_hnlq_linear(in_dim, out_dim, device=None, **kwargs):
         HNLQLinearQAT instance configured for E8 lattice
     """
     # Import here to avoid circular imports
-    from ..vq_layers import HNLQLinearQAT, get_generators
+    from ..layers import HNLQLinearQAT, get_generators
     from .codecs import e8_quantize
     
     # Ensure input dimension is divisible by 8

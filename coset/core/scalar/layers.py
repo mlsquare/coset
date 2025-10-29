@@ -52,7 +52,7 @@ def create_lsq_scalar_linear(
         >>> layer = create_lsq_scalar_linear(512, 128, q=2, M=8, tiling='block', block_size=8)
     """
     # Import here to avoid circular imports
-    from ..vq_layers import HNLQLinearQAT
+    from ..layers import HNLQLinearQAT
     
     # Default to cuda if available and device not specified
     if device is None:
