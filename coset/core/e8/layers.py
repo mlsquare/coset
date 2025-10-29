@@ -54,6 +54,8 @@ def create_e8_hnlq_linear(in_dim, out_dim, device=None, **kwargs):
         'warmup_epochs': 0,  # Default: no warmup
         'enable_diagnostics': False,  # Default: no diagnostics
         'weight_clip_value': 2.0,  # Default clipping value
+        'theta_trainable': True,  # Default: learnable scale parameters
+        'theta_init_value': 0.0,  # Default: start at midpoint of bounds
     }
     
     # Update with provided kwargs

@@ -13,6 +13,7 @@ A high-performance PyTorch library implementing **Hierarchical Nested-Lattice Qu
 - **QAT with Cold Start**: Gradual quantization activation for stable training
 - **CUDA Acceleration**: GPU-optimized quantization operations
 - **Constructor-Based API**: Easy-to-use layer constructors for different lattices
+- **Flexible Scale Parameters**: Learnable or fixed scale parameters for quantization
 - **Comprehensive Examples**: Binary and multi-class classification examples
 - **Future Support**: D4 and other lattice types will be added
 
@@ -72,7 +73,9 @@ class QuantizedBERTClassifier(torch.nn.Module):
             out_dim=num_classes,
             warmup_epochs=2,  # Cold start
             enable_diagnostics=True,
-            weight_clip_value=2.0
+            weight_clip_value=2.0,
+            theta_trainable=True,  # Learnable scale parameters
+            theta_init_value=0.0   # Start at midpoint of bounds
         )
         self.sigmoid = torch.nn.Sigmoid()
     
@@ -166,9 +169,42 @@ layer = create_e8_hnlq_linear(
     warmup_epochs=2,              # Cold start epochs
     enable_diagnostics=True,      # Enable weight diagnostics
     weight_clip_value=2.0,        # Weight clipping threshold
+    theta_trainable=True,         # Learnable scale parameters (default)
+    theta_init_value=0.0,         # Initial theta value (default)
     device=None                   # Auto-detect CUDA
 )
 ```
+
+### Scale Parameter Options
+
+```python
+# Learnable scale parameters (default behavior)
+layer = create_e8_hnlq_linear(
+    in_dim=768, out_dim=10,
+    theta_trainable=True,         # Scale parameters are learnable
+    theta_init_value=0.0          # Start at midpoint of bounds
+)
+
+# Fixed scale parameters (deterministic)
+layer = create_e8_hnlq_linear(
+    in_dim=768, out_dim=10,
+    theta_trainable=False,        # Scale parameters are fixed
+    theta_init_value=0.0          # Fixed at midpoint: (beta_min + beta_max) / 2
+)
+
+# Custom fixed scale parameters
+layer = create_e8_hnlq_linear(
+    in_dim=768, out_dim=10,
+    theta_trainable=False,        # Scale parameters are fixed
+    theta_init_value=1.0          # Fixed at: beta_min + sigmoid(1.0) * (beta_max - beta_min)
+)
+```
+
+**Benefits of Fixed Scale Parameters:**
+- **Deterministic**: Consistent quantization behavior across runs
+- **Reduced Parameters**: Fewer trainable parameters (theta_beta becomes a buffer)
+- **Stable Training**: No gradient updates for scale parameters
+- **Midpoint Strategy**: `theta_init_value=0.0` gives `(beta_min + beta_max) / 2`
 
 ### QAT Methods
 
@@ -228,6 +264,7 @@ config = LatticeConfig(
 - [x] Binary and multi-class classification examples
 - [x] Comprehensive QAT comparison tools
 - [x] Constructor-based API
+- [x] Flexible scale parameters (learnable or fixed)
 
 ### Coming Soon 🚧
 - [ ] **D4 Lattice Support**: 4D checkerboard lattice implementation

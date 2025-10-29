@@ -201,6 +201,9 @@ class HNLQLinearQAT(nn.Module):
         bias: Whether to use bias
         warmup_epochs: Number of epochs to train without quantization (cold start)
         enable_diagnostics: Whether to enable weight diagnostics
+        weight_clip_value: Maximum absolute value for weight clipping
+        theta_trainable: Whether theta_beta is a learnable parameter (True) or fixed buffer (False)
+        theta_init_value: Initial value for theta_beta (used when not trainable)
     """
     
     def __init__(
@@ -225,7 +228,9 @@ class HNLQLinearQAT(nn.Module):
         bias: bool = True,
         warmup_epochs: int = 0,
         enable_diagnostics: bool = False,
-        weight_clip_value: float = 2.0
+        weight_clip_value: float = 2.0,
+        theta_trainable: bool = True,
+        theta_init_value: float = 0.0
     ):
         super().__init__()
         
@@ -242,6 +247,8 @@ class HNLQLinearQAT(nn.Module):
         self.quantize_activations = quantize_activations
         self.init_method = init_method
         self.init_kwargs = init_kwargs or {}
+        self.theta_trainable = theta_trainable
+        self.theta_init_value = theta_init_value
         
         # Store lattice matrices
         self.register_buffer('G', G)
@@ -265,7 +272,12 @@ class HNLQLinearQAT(nn.Module):
         
         # Tiling configuration - theta_beta is single scalar per tile
         tiles = out_features if tiling == 'row' else out_features * (in_features // block_size)
-        self.theta_beta = nn.Parameter(torch.zeros(tiles))
+        
+        # Initialize theta_beta as parameter or buffer based on trainable flag
+        if theta_trainable:
+            self.theta_beta = nn.Parameter(torch.full((tiles,), theta_init_value))
+        else:
+            self.register_buffer('theta_beta', torch.full((tiles,), theta_init_value))
         
         # EMA buffers for adaptive scaling
         self.register_buffer('sigma_ema', torch.ones(tiles))
@@ -636,7 +648,8 @@ class HNLQLinearQAT(nn.Module):
         return f'in_features={self.in_features}, out_features={self.out_features}, ' \
                f'lattice_type={self.lattice_type}, q={self.q}, M={self.M}, ' \
                f'tiling={self.tiling}, block_size={self.block_size}, ' \
-               f'quantize_activations={self.quantize_activations}, bias={self.bias is not None}'
+               f'quantize_activations={self.quantize_activations}, bias={self.bias is not None}, ' \
+               f'theta_trainable={self.theta_trainable}, theta_init_value={self.theta_init_value}'
 
 
 # Backward compatibility alias
