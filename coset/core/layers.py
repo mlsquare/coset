@@ -182,15 +182,12 @@ class HNLQLinearQAT(nn.Module):
     Args:
         in_features: Input dimension
         out_features: Output dimension
-        G: Generator matrix for the lattice
-        Ginv: Inverse of the generator matrix
+        lattice: Lattice object (e.g., E8Lattice, D4Lattice) with geometric properties
         quantize_fn: Lattice-specific quantization function (e.g., e8_quantize)
-        lattice_type: Type of lattice ('E8', 'D4', etc.) - for metadata only
         q: Quantization parameter (alphabet size)
         M: Number of hierarchical levels
-        Delta0: Base quantization step size
+        Delta0: Base quantization step size (optional, computed from lattice if None)
         eta: Learning rate for scaling factors
-        k: Number of scaling factors per row/block
         tiling: Tiling strategy ('row' or 'block')
         block_size: Size of quantization blocks
         quantize_activations: Whether to quantize activations
@@ -204,19 +201,18 @@ class HNLQLinearQAT(nn.Module):
         weight_clip_value: Maximum absolute value for weight clipping
         theta_trainable: Whether theta_beta is a learnable parameter (True) or fixed buffer (False)
         theta_init_value: Initial value for theta_beta (used when not trainable)
+        rho: Scaling factor for Delta0 computation (default: 0.95)
     """
     
     def __init__(
         self,
         in_features: int,
         out_features: int,
-        G: torch.Tensor,
-        Ginv: torch.Tensor,
+        lattice,  # Lattice object instead of G, Ginv
         quantize_fn,
-        lattice_type: str = 'E8',
         q: int = 4,
         M: int = 2,
-        Delta0: float = 1.5,
+        Delta0: Optional[float] = None,  # Optional, will be computed from lattice if None
         eta: float = 0.1,
         tiling: str = 'row',
         block_size: int = 8,
@@ -230,17 +226,18 @@ class HNLQLinearQAT(nn.Module):
         enable_diagnostics: bool = False,
         weight_clip_value: float = 2.0,
         theta_trainable: bool = True,
-        theta_init_value: float = 0.0
+        theta_init_value: float = 0.0,
+        rho: float = 0.95  # Scaling factor for Delta0 computation
     ):
         super().__init__()
         
         self.in_features = in_features
         self.out_features = out_features
         self.quantize_fn = quantize_fn
-        self.lattice_type = lattice_type
+        self.lattice = lattice
+        self.lattice_type = lattice.name
         self.q = q
         self.M = M
-        self.Delta0 = Delta0
         self.eta = eta
         self.tiling = tiling
         self.block_size = block_size
@@ -249,8 +246,16 @@ class HNLQLinearQAT(nn.Module):
         self.init_kwargs = init_kwargs or {}
         self.theta_trainable = theta_trainable
         self.theta_init_value = theta_init_value
+        self.rho = rho
+        
+        # Compute Delta0 from lattice geometry if not provided
+        if Delta0 is None:
+            self.Delta0 = lattice.compute_delta0(q, M, rho)
+        else:
+            self.Delta0 = Delta0
         
         # Store lattice matrices
+        G, Ginv = lattice.get_generators()
         self.register_buffer('G', G)
         self.register_buffer('Ginv', Ginv)
         
@@ -382,8 +387,8 @@ class HNLQLinearQAT(nn.Module):
         beta_min = (self.Delta0 / qM) / (self.eta * ginv * self.sigma_ema)
         
         # Maximum bounds: deterministic (xmax) and probabilistic (eta*sigma)
-        beta_max_det = (self.Delta0 * qM) / (2 * ginv * self.xmax_ema)
-        beta_max_prob = (self.Delta0 * qM) / (2 * self.eta * ginv * self.sigma_ema)
+        beta_max_det = (self.Delta0 * (qM - 1)) / (2 * ginv * self.xmax_ema)
+        beta_max_prob = (self.Delta0 * (qM - 1)) / (2 * self.eta * ginv * self.sigma_ema)
         
         beta_max = torch.minimum(beta_max_det, beta_max_prob)
         beta_min = torch.minimum(beta_min, beta_max * 0.9)
@@ -647,9 +652,10 @@ class HNLQLinearQAT(nn.Module):
     def extra_repr(self):
         return f'in_features={self.in_features}, out_features={self.out_features}, ' \
                f'lattice_type={self.lattice_type}, q={self.q}, M={self.M}, ' \
-               f'tiling={self.tiling}, block_size={self.block_size}, ' \
+               f'Delta0={self.Delta0:.4f}, tiling={self.tiling}, block_size={self.block_size}, ' \
                f'quantize_activations={self.quantize_activations}, bias={self.bias is not None}, ' \
-               f'theta_trainable={self.theta_trainable}, theta_init_value={self.theta_init_value}'
+               f'theta_trainable={self.theta_trainable}, theta_init_value={self.theta_init_value}, ' \
+               f'rho={self.rho}'
 
 
 # Backward compatibility alias

@@ -1,8 +1,8 @@
 """
-E₈ lattice implementation.
+D₄ lattice implementation.
 
-The E₈ lattice is an 8D lattice with exceptional properties.
-It is optimal for 8D sphere packing and has many applications in coding theory and quantization.
+The D₄ lattice is a 4D lattice where the sum of coordinates must be even.
+It has excellent packing properties in 4D and is commonly used in lattice quantization.
 """
 
 import torch
@@ -11,65 +11,60 @@ from typing import Optional
 from ..base import Lattice, LatticeConfig
 
 
-class E8Lattice(Lattice):
+class D4Lattice(Lattice):
     """
-    E₈ lattice implementation.
+    D₄ lattice implementation.
     
-    The E₈ lattice is an 8-dimensional lattice that can be constructed
-    from the D₈ lattice and a coset. It has the highest known packing
-    density in 8D.
+    The D₄ lattice consists of all integer points where the sum of coordinates
+    is even. It has excellent packing properties in 4D and is optimal for
+    4D sphere packing.
     """
     
-    def __init__(self, device: Optional[torch.device] = None, config: Optional["LatticeConfig"] = None):
+    def __init__(self, device: Optional[torch.device] = None, config: Optional[LatticeConfig] = None):
         """
-        Initialize the E₈ lattice with its generator matrix.
+        Initialize the D₄ lattice with its generator matrix.
         
         Args:
             device: Device to place the generator matrix on
             config: Optional lattice configuration
         """
-        # Create G tensor directly on target device to avoid CPU-GPU transfer
         G = torch.tensor([
-            [2, 0, 0, 0, 0, 0, 0, 0],
-            [-1, 1, 0, 0, 0, 0, 0, 0],
-            [0, -1, 1, 0, 0, 0, 0, 0],
-            [0, 0, -1, 1, 0, 0, 0, 0],
-            [0, 0, 0, -1, 1, 0, 0, 0],
-            [0, 0, 0, 0, -1, 1, 0, 0],
-            [0, 0, 0, 0, 0, -1, 1, 0],
-            [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5],
+            [-1, -1, 0, 0],
+            [1, -1, 0, 0], 
+            [0, 1, -1, 0],
+            [0, 0, 1, -1]
         ], dtype=torch.float32, device=device).T
-        super().__init__(G, "E8", device=device, config=config)
+        super().__init__(G, "D4", device=device, config=config)
     
     def _compute_packing_radius(self) -> float:
         """
-        Compute the packing radius of the E8 lattice.
+        Compute the packing radius of the D4 lattice.
         
-        The E8 lattice has a known packing radius of 1/2 = 0.5.
-        This is the optimal packing radius for 8D lattices.
+        The D4 lattice has a known packing radius of 1/sqrt(2) ≈ 0.707.
+        This is the optimal packing radius for 4D lattices.
         
         Returns:
-            Packing radius as a float (0.5)
+            Packing radius as a float
         """
-        return 0.5
+        return 1.0 / np.sqrt(2)
     
     def _compute_covering_radius(self) -> float:
         """
-        Compute the covering radius of the E8 lattice.
+        Compute the covering radius of the D4 lattice.
         
-        The E8 lattice has a known covering radius of sqrt(2)/2 ≈ 0.707.
+        The D4 lattice has a known covering radius of 1.
         
         Returns:
             Covering radius as a float
         """
-        return np.sqrt(2) / 2
+        return 1.0
     
     def g_x(self, x: torch.Tensor) -> torch.Tensor:
         """
         Compute g(x) by rounding the vector x to the nearest integers,
         but flip the rounding for the coordinate farthest from an integer.
         
-        This is a helper function for the E₈ lattice closest point algorithm.
+        This is a helper function for the D₄ lattice closest point algorithm.
         Handles both single vectors and batch inputs.
         
         Args:
@@ -113,19 +108,19 @@ class E8Lattice(Lattice):
     
     def projection(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Nearest-neighbor quantization to E₈ lattice.
+        Nearest-neighbor quantization to D₄ lattice.
         
-        The E₈ lattice is constructed as the union of D₈ and D₈ + (0.5)⁸.
-        The algorithm:
-        1. Finds the closest point in D₈ to x
-        2. Finds the closest point in D₈ + (0.5)⁸ to x
-        3. Returns the closer of the two points
+        The D₄ lattice algorithm:
+        1. Round x to the nearest integer vector
+        2. If the sum is even, this is the closest point
+        3. If the sum is odd, flip the rounding for the coordinate farthest
+           from an integer to get a valid D₄ lattice point
         
         Args:
             x: Input tensor to quantize (shape [d] or [batch_size, d])
             
         Returns:
-            Quantized tensor (nearest E₈ lattice point)
+            Quantized tensor (nearest D₄ lattice point)
         """
         # Handle both single vector and batch cases
         if x.dim() == 1:
@@ -134,37 +129,18 @@ class E8Lattice(Lattice):
         else:
             squeeze_output = False
         
-        # Find closest point in D₈
         f_x = self.custom_round(x)
         sum_parity = torch.sum(f_x, dim=-1) % 2  # [batch_size] or scalar
-        y_0 = torch.where(
+        
+        # If sum is even, f_x is the closest point
+        # If sum is odd, use g_x to get a valid D₄ point
+        result = torch.where(
             (sum_parity == 0).unsqueeze(-1) if x.dim() > 1 else (sum_parity == 0),
-            f_x, 
+            f_x,
             self.g_x(x)
         )
-        
-        # Find closest point in D₈ + (0.5)⁸
-        # Ensure 0.5 constant is on the same device as input
-        half = torch.tensor(0.5, device=x.device, dtype=x.dtype)
-        f_x_shifted = self.custom_round(x - half)
-        g_x_shifted = self.g_x(x - half)
-        sum_parity_shifted = torch.sum(f_x_shifted, dim=-1) % 2
-        
-        y_1 = torch.where(
-            (sum_parity_shifted == 0).unsqueeze(-1) if x.dim() > 1 else (sum_parity_shifted == 0),
-            f_x_shifted + half,
-            g_x_shifted + half
-        )
-        
-        # Return the closer point
-        dist_0 = torch.norm(x - y_0, dim=-1)  # [batch_size] or scalar
-        dist_1 = torch.norm(x - y_1, dim=-1)
-        
-        closer_mask = (dist_0 < dist_1).unsqueeze(-1) if x.dim() > 1 else (dist_0 < dist_1)
-        result = torch.where(closer_mask, y_0, y_1)
         
         if squeeze_output:
             result = result.squeeze(0)
         
         return result
-    

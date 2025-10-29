@@ -74,6 +74,8 @@ class Lattice(ABC):
         name: Name of the lattice
         d: Dimension of the lattice
         config: Optional lattice configuration
+        r_pack: Packing radius of the lattice
+        r_cov: Covering radius of the lattice
     """
     
     def __init__(self, G: torch.Tensor, name: str, device: Optional[torch.device] = None, config: Optional[LatticeConfig] = None):
@@ -99,6 +101,10 @@ class Lattice(ABC):
         self.d = G.shape[0]
         self.device = G.device
         self.config = config
+        
+        # Compute lattice geometric properties
+        self.r_pack = self._compute_packing_radius()
+        self.r_cov = self._compute_covering_radius()
     
     def get_generators(self) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -221,6 +227,61 @@ class Lattice(ABC):
             delta = float(magnitude)
         
         return delta * u  # add to x before Q_L(x)
+    
+    def _compute_packing_radius(self) -> float:
+        """
+        Compute the packing radius of the lattice.
+        
+        The packing radius is half the length of the shortest non-zero vector
+        in the lattice. For most lattices, this can be computed from the
+        generator matrix.
+        
+        Returns:
+            Packing radius as a float
+        """
+        # Compute the Gram matrix G^T * G
+        gram_matrix = torch.mm(self.G.T, self.G)
+        
+        # Find the minimum non-zero eigenvalue (squared length of shortest vector)
+        eigenvals = torch.linalg.eigvals(gram_matrix)
+        min_eigenval = torch.min(torch.real(eigenvals[eigenvals.real > 1e-10]))
+        
+        # Packing radius is half the length of the shortest vector
+        return 0.5 * torch.sqrt(min_eigenval).item()
+    
+    def _compute_covering_radius(self) -> float:
+        """
+        Compute the covering radius of the lattice.
+        
+        The covering radius is the radius of the largest sphere that can be
+        inscribed within the Voronoi cell of the lattice. This is more complex
+        to compute and may require numerical methods for general lattices.
+        
+        For now, we provide a default implementation that can be overridden
+        by specific lattice implementations.
+        
+        Returns:
+            Covering radius as a float
+        """
+        # Default implementation: use packing radius * sqrt(dimension)
+        # This is a rough approximation that can be overridden
+        return self.r_pack * np.sqrt(self.d)
+    
+    def compute_delta0(self, q: int, M: int, rho: float = 0.95) -> float:
+        """
+        Compute Delta0 parameter for the lattice quantizer.
+        
+        Delta0 = 2 * rho * r_pack / (q^M - 1)
+        
+        Args:
+            q: Quantization parameter (alphabet size)
+            M: Number of hierarchical levels
+            rho: Scaling factor (default: 0.95)
+            
+        Returns:
+            Delta0 parameter as a float
+        """
+        return (2.0 * rho * self.r_pack) / (q**M - 1)
     
     def __repr__(self) -> str:
         """String representation of the lattice."""
