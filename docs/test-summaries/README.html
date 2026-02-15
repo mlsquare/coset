@@ -363,7 +363,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <ul>
 <li>v0.26: Cleanup and reorganization</li>
 <li>v0.25: E8 HNLQ vLUT implementation</li>
-<li>Earlier: CUDA integration, initial implementations</li>
+<li>Earlier: Initial implementations</li>
 </ul>
 </section>
 </section>
@@ -477,7 +477,7 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
   }
     var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
     var mailtoRegex = new RegExp(/^mailto:/);
-      var filterRegex = new RegExp("https:\/\/mlsquare\.github\.io\/coset\/");
+      var filterRegex = new RegExp('/' + window.location.host + '/');
     var isInternal = (href) => {
         return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
     }

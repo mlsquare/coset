@@ -11,7 +11,6 @@ A high-performance PyTorch library implementing **Hierarchical Nested-Lattice Qu
 - **E8 Lattice Support**: High-dimensional E8 lattice quantization with optimized algorithms
 - **Transformer Integration**: Pre-trained BERT with quantized classification heads
 - **QAT with Cold Start**: Gradual quantization activation for stable training
-- **CUDA Acceleration**: GPU-optimized quantization operations
 - **Constructor-Based API**: Easy-to-use layer constructors for different lattices
 - **Flexible Scale Parameters**: Learnable or fixed scale parameters for quantization
 - **Comprehensive Examples**: Binary and multi-class classification examples
@@ -44,8 +43,6 @@ pip install -e .
 # Install example dependencies
 pip install transformers torchvision scikit-learn matplotlib
 
-# For CUDA support (if available)
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 ```
 
 ## Quick Start
@@ -171,7 +168,7 @@ layer = create_e8_hnlq_linear(
     weight_clip_value=2.0,        # Weight clipping threshold
     theta_trainable=True,         # Learnable scale parameters (default)
     theta_init_value=0.0,         # Initial theta value (default)
-    device=None                   # Auto-detect CUDA
+    device=None                   # Defaults to CPU
 )
 ```
 

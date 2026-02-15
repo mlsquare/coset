@@ -11,7 +11,6 @@ A high-performance PyTorch library implementing **Hierarchical Nested-Lattice Qu
 - **E8 Lattice Support**: High-dimensional E8 lattice quantization with optimized algorithms
 - **Transformer Integration**: Pre-trained BERT with quantized classification heads
 - **QAT with Cold Start**: Gradual quantization activation for stable training
-- **CUDA Acceleration**: GPU-optimized quantization operations
 - **Constructor-Based API**: Easy-to-use layer constructors for different lattices
 - **Flexible Scale Parameters**: Learnable or fixed scale parameters for quantization
 - **Comprehensive Examples**: Binary and multi-class classification examples

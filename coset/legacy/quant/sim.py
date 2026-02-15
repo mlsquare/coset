@@ -38,7 +38,7 @@ class LatticeVectorSimulator:
     """
     
     def __init__(self, lattice_type: str = "E8", q: int = 3, M: int = 2, 
-                 device: str = "cuda" if torch.cuda.is_available() else "cpu"):
+                 device: str = "cpu"):
         """
         Initialize the lattice vector simulator.
         
@@ -200,9 +200,6 @@ class LatticeVectorSimulator:
             for i in range(batch_size):
                 _ = encode(test_vectors[i], self.lattice, self.config)
             
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-            
             encode_times.append(time.perf_counter() - start_time)
         
         # Time decoding
@@ -223,9 +220,6 @@ class LatticeVectorSimulator:
             start_time = time.perf_counter()
             
             _ = self.decode_encodings(encodings, t_values)
-            
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
             
             decode_times.append(time.perf_counter() - start_time)
         
@@ -310,7 +304,7 @@ class LatticeVectorSimulator:
 
 
 def create_simulator(lattice_type: str = "E8", q: int = 3, M: int = 2, 
-                    device: str = "cuda" if torch.cuda.is_available() else "cpu") -> LatticeVectorSimulator:
+                    device: str = "cpu") -> LatticeVectorSimulator:
     """
     Convenience function to create a lattice vector simulator.
     

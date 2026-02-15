@@ -322,7 +322,6 @@ def batch_encode(
     
     batch_size = X.shape[0]
     
-    # Loop-based implementation (will be replaced with CUDA kernels)
     encoded_vectors = []
     scaling_counts = []
     
@@ -366,7 +365,6 @@ def batch_decode(
     
     batch_size = encoded_vectors.shape[0]
     
-    # Loop-based implementation (will be replaced with CUDA kernels)
     decoded_vectors = []
     for i in range(batch_size):
         decoded = decode(encoded_vectors[i], lattice, config, scaling_counts[i].item(), dither, device=device)

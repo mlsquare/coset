@@ -610,7 +610,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </section>
 <section id="future-work" class="level2">
 <h2 class="anchored" data-anchor-id="future-work">Future Work</h2>
-<p>Potential extensions: - Two-sided vLUT testing and examples - GPU acceleration for vLUT operations - Integration with popular vector database systems - Transformer attention with quantized weights - Multi-query batch optimization - Approximate nearest neighbor (ANN) with vLUT</p>
+<p>Potential extensions: - Two-sided vLUT testing and examples - Integration with popular vector database systems - Transformer attention with quantized weights - Multi-query batch optimization - Approximate nearest neighbor (ANN) with vLUT</p>
 <hr>
 </section>
 <section id="citation" class="level2">
@@ -725,7 +725,7 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
   }
     var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
     var mailtoRegex = new RegExp(/^mailto:/);
-      var filterRegex = new RegExp("https:\/\/mlsquare\.github\.io\/coset\/");
+      var filterRegex = new RegExp('/' + window.location.host + '/');
     var isInternal = (href) => {
         return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
     }

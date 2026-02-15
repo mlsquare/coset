@@ -212,7 +212,7 @@ def main():
     print("="*70)
     
     # Setup
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cpu')
     print(f"Using device: {device}")
     
     lattice = E8Lattice(device=device)

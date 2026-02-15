@@ -3,7 +3,7 @@ Value Lookup Table (vLUT) management for modulo arithmetic operations.
 
 This module provides efficient vLUT operations for MAC and A&A operations
 in the HNLQ encoding space. vLUTs store actual scalar values of inner products,
-providing fast lookup-based operations with PyTorch GPU acceleration.
+providing fast lookup-based operations.
 """
 
 import torch
@@ -18,7 +18,7 @@ class vLUTManager:
     Manages value LUTs (vLUTs) for modulo arithmetic operations.
     
     vLUTs store actual scalar values of inner products, providing
-    fast lookup-based operations with PyTorch GPU acceleration.
+    fast lookup-based operations.
     """
     
     def __init__(self, lattice: Lattice, config: QuantizationConfig):

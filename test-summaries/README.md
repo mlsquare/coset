@@ -188,7 +188,7 @@ lattice_points = encodings.float() @ self.lattice.G.T
 ### Previous Versions
 - v0.26: Cleanup and reorganization
 - v0.25: E8 HNLQ vLUT implementation
-- Earlier: CUDA integration, initial implementations
+- Earlier: Initial implementations
 
 ## 🤝 Contributing
 

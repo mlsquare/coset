@@ -27,7 +27,7 @@ try:
     
     print('🎉 COSET setup complete!')
     print('You can now run the examples:')
-    print('  python3 examples/optim/mnist_cpu_gpu_comparison.py')
+    print('  python3 examples/bert_binary_classifier_e8.py')
     print('  python3 examples/optim/bert_binary_classification.py')
     
 except ImportError as e:

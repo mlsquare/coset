@@ -2,7 +2,7 @@
 
 ## 1. 🎯 Overview
 
-This PRD describes the implementation of **Quantization-Aware Training (QAT)** using **lattice-based quantization** techniques, integrated as a **Linear Layer module** in deep neural networks. The key principle is to encode floating-point vectors into quantized representations via lattice encodings and use these representations to perform **dot products and matrix multiplications** efficiently through **lookup tables (LUTs)** or **CUDA kernels**. 
+This PRD describes the implementation of **Quantization-Aware Training (QAT)** using **lattice-based quantization** techniques, integrated as a **Linear Layer module** in deep neural networks. The key principle is to encode floating-point vectors into quantized representations via lattice encodings and use these representations to perform **dot products and matrix multiplications** efficiently through **lookup tables (LUTs)**. 
 
 This design enables neural networks to train with quantization effects simulated during forward propagation, while retaining full-precision gradient updates during backpropagation.
 
@@ -39,7 +39,6 @@ where `𝑥̂` is the quantized approximation of `x`.
 
 **Variants:**
 - **CPU/Torch implementation:** Encoding and decoding implemented in Python/Torch.
-- **GPU implementation:** CUDA kernels for encoding, decoding, and LUT-based dot products.
 
 ### 3.2 Backward Pass (Straight-Through Estimator, STE)
 
@@ -77,7 +76,7 @@ where `𝑥̂` is the quantized approximation of `x`.
 **Responsibilities:**
 - Implements forward (quantized) and backward (STE) operations.
 - Supports lattice configuration (E8, D4, scalar, etc.).
-- Configurable LUT backend: Torch or CUDA.
+- Configurable LUT backend: PyTorch.
 
 **Forward Path:**
 1. Encode input and/or weights → index space.

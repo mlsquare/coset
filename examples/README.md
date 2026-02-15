@@ -144,13 +144,13 @@ You can modify the examples to:
 ### Common Issues
 
 1. **Import Error**: Make sure Coset is properly installed
-2. **CUDA Error**: The examples work on both CPU and GPU
+2. **Device**: The examples run on CPU
 3. **Memory Error**: Reduce batch size or model size
 4. **Slow Training**: LSQ quantization adds some overhead during training
 
 ### Performance Tips
 
-1. **Use GPU**: Training is faster on GPU
+1. **Batch size**: Tune for your hardware
 2. **Batch Size**: Larger batches can improve training efficiency
 3. **Learning Rate**: May need adjustment for quantized models
 4. **Warmup**: Consider using warmup epochs for better quantization adaptation

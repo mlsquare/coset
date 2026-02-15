@@ -13,7 +13,6 @@ tests/
     ├── test_lattices.py              # Z2, D4, E8 lattice tests
     ├── test_nn.py                    # QLinear tests
     ├── test_quant.py                 # Quantization functions
-    ├── test_e8_gpu.py                # E8 GPU operations
     ├── test_one_sided_vlut_pytest.py # One-sided vLUT operations
     └── test_quantized_vectors_pytest.py # Quantized vector operations
 ```
@@ -26,7 +25,6 @@ Tests for backward compatibility with the deprecated `coset.legacy` modules:
 - **Lattice operations** - Z2, D4, E8 nearest-neighbor quantization
 - **Neural network layers** - QLinear with quantization
 - **Quantization functions** - encode, decode, quantize
-- **E8 GPU operations** - GPU-accelerated E8 quantization
 - **vLUT operations** - One-sided value lookup tables
 - **Simulated quantization** - Vector simulator tests
 
@@ -76,8 +74,6 @@ pytest tests/ -m "not slow" -v
 # Run only slow (performance) tests
 pytest tests/ -m "slow" -v
 
-# Run only CUDA tests (if CUDA available)
-pytest tests/ -m "cuda" -v
 ```
 
 ### Run Tests with Coverage
@@ -118,14 +114,12 @@ python_classes = Test*
 python_functions = test_*
 markers =
     slow: marks tests as slow (deselect with '-m "not slow"')
-    cuda: marks tests that require CUDA
     integration: marks tests as integration tests
 ```
 
 ## Test Markers
 
 - `@pytest.mark.slow` - Performance benchmarks and long-running tests
-- `@pytest.mark.cuda` - Tests requiring CUDA/GPU
 - `@pytest.mark.integration` - Integration tests
 - `@pytest.mark.unit` - Unit tests
 
@@ -152,13 +146,6 @@ markers =
 - ✅ MAC modulo-q operations
 - ✅ Accumulate modulo-q
 - ✅ Batch operations
-
-### E8 GPU (`test_e8_gpu.py`)
-- ✅ CPU vs GPU correctness
-- ✅ Device handling
-- ✅ Batch operations
-- ✅ Edge cases and boundary conditions
-- ✅ Performance benchmarks
 
 ### vLUT (`test_one_sided_vlut_pytest.py`)
 - ✅ vLUT construction
@@ -235,7 +222,6 @@ pytest tests/ -x
 ### Optional Requirements
 - pytest-cov >= 4.0.0 (for coverage reports)
 - pytest-xdist >= 3.0.0 (for parallel execution)
-- CUDA-capable GPU (for CUDA tests)
 
 ## Adding New Tests
 
@@ -276,7 +262,6 @@ class TestHNLQLinear:
 ## Known Issues
 
 - Legacy tests may show deprecation warnings - this is expected
-- Some CUDA tests require specific GPU hardware
 - Performance tests marked as `slow` can take significant time
 
 ## License

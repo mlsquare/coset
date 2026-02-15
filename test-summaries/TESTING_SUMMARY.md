@@ -246,7 +246,6 @@ For quantized vector x̂ with encodings {b₀, b₁, ..., b_{M-1}}:
 
 Potential extensions:
 - Two-sided vLUT testing and examples
-- GPU acceleration for vLUT operations
 - Integration with popular vector database systems
 - Transformer attention with quantized weights
 - Multi-query batch optimization

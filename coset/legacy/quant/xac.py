@@ -2,12 +2,7 @@
 Multiply and Accumulate (MAC) and Add & Accumulate (AAC) operations.
 
 This module provides the user-facing API for MAC and AAC operations in the HNLQ
-encoding space. It automatically selects the best available implementation:
-1. CUDA kernels (if available and tensors are on GPU)
-2. PyTorch GPU operations (if GPU available)
-3. PyTorch CPU operations (fallback)
-
-The module uses either eLUT (encoding LUT) or vLUT (value LUT) operations
+encoding space. The module uses either eLUT (encoding LUT) or vLUT (value LUT) operations
 depending on the requirements and available implementations.
 """
 
@@ -24,11 +19,6 @@ def mac(encodings_x: List[torch.Tensor], encodings_y: List[torch.Tensor],
         use_elut: bool = False) -> torch.Tensor:
     """
     Multiply and Accumulate operation - user-facing API.
-    
-    Automatically selects the best available implementation:
-    1. CUDA kernels (if available and tensors are on GPU)
-    2. PyTorch GPU operations (if GPU available)
-    3. PyTorch CPU operations (fallback)
     
     Args:
         encodings_x: List of M encoding tensors for x
@@ -71,11 +61,6 @@ def aac(encodings: List[torch.Tensor],
         use_elut: bool = False) -> List[torch.Tensor]:
     """
     Add and Accumulate operation - user-facing API.
-    
-    Automatically selects the best available implementation:
-    1. CUDA kernels (if available and tensors are on GPU)
-    2. PyTorch GPU operations (if GPU available)
-    3. PyTorch CPU operations (fallback)
     
     Args:
         encodings: List of M encoding tensors to accumulate

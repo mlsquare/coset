@@ -2,7 +2,7 @@
 E8 Lattice Codecs Module
 
 This module provides optimized encode/decode functions specifically for E8 lattice
-quantization, including both CPU and GPU implementations.
+quantization, for E8 lattice quantization.
 """
 
 import warnings

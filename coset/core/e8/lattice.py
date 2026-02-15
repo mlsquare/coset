@@ -28,7 +28,7 @@ class E8Lattice(Lattice):
             device: Device to place the generator matrix on
             config: Optional lattice configuration
         """
-        # Create G tensor directly on target device to avoid CPU-GPU transfer
+        # Create G tensor on target device
         G = torch.tensor([
             [2, 0, 0, 0, 0, 0, 0, 0],
             [-1, 1, 0, 0, 0, 0, 0, 0],

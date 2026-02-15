@@ -13,7 +13,6 @@ Coset is a PyTorch library implementing **Hierarchical Nested-Lattice Quantizati
 - E8 and D4 lattice support
 - Integration with transformer models (BERT)
 - QAT with cold start for stable training
-- CUDA-optimized quantization operations
 
 ## Installation
 
@@ -26,14 +25,6 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -e .
 pip install transformers torchvision scikit-learn matplotlib
-```
-
-### CUDA Support
-
-For GPU acceleration:
-
-```bash
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 ```
 
 ## API Reference
