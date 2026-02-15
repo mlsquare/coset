@@ -164,221 +164,46 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 
 <section id="test-documentation-archive" class="level1">
 <h1>Test Documentation Archive</h1>
-<p>This directory contains comprehensive documentation and summaries of all testing efforts for the COSET library.</p>
+<p>Documentation for the COSET test suite.</p>
 <section id="contents" class="level2">
-<h2 class="anchored" data-anchor-id="contents">📁 Contents</h2>
+<h2 class="anchored" data-anchor-id="contents">Contents</h2>
 <section id="test-summaries" class="level3">
 <h3 class="anchored" data-anchor-id="test-summaries">Test Summaries</h3>
 <ol type="1">
-<li><strong><a href="../test-summaries/TESTING_SUMMARY.html">TESTING_SUMMARY.md</a></strong> - Complete testing overview
-<ul>
-<li>Quantized vectors testing results</li>
-<li>One-sided vLUT testing and fixes</li>
-<li>Performance metrics and benchmarks</li>
-<li>Implementation details and architecture</li>
-<li>Before/after comparisons</li>
-</ul></li>
-<li><strong><a href="../test-summaries/PYTEST_CONVERSION_SUMMARY.html">PYTEST_CONVERSION_SUMMARY.md</a></strong> - Pytest conversion details
-<ul>
-<li>Migration from standalone scripts to pytest</li>
-<li>Test structure and organization</li>
-<li>Fixtures and parametrization</li>
-<li>CI/CD integration guide</li>
-<li>Usage examples and best practices</li>
-</ul></li>
+<li><strong><a href="TESTING_SUMMARY.html">TESTING_SUMMARY</a></strong> - Testing overview</li>
+<li><strong><a href="PYTEST_CONVERSION_SUMMARY.html">PYTEST_CONVERSION_SUMMARY</a></strong> - Pytest structure</li>
 </ol>
 </section>
 </section>
 <section id="quick-reference" class="level2">
-<h2 class="anchored" data-anchor-id="quick-reference">📊 Quick Reference</h2>
-<section id="test-statistics" class="level3">
-<h3 class="anchored" data-anchor-id="test-statistics">Test Statistics</h3>
-<p><strong>Total Tests:</strong> 58 (54 fast + 4 slow)</p>
-<p><strong>Test Files:</strong> - <code>tests/test_quantized_vectors_pytest.py</code> - 34 tests - <code>tests/test_one_sided_vlut_pytest.py</code> - 24 tests</p>
-<p><strong>Pass Rate:</strong> 100% ✅</p>
-<p><strong>Runtime:</strong> - Fast tests: ~55 seconds - All tests: ~90 seconds</p>
+<h2 class="anchored" data-anchor-id="quick-reference">Quick Reference</h2>
+<section id="test-structure" class="level3">
+<h3 class="anchored" data-anchor-id="test-structure">Test Structure</h3>
+<pre><code>tests/
+└── legacy/
+    ├── test_lattices.py
+    ├── test_nn.py
+    ├── test_quant.py
+    └── test_quantized_vectors_pytest.py</code></pre>
 </section>
-<section id="key-achievements" class="level3">
-<h3 class="anchored" data-anchor-id="key-achievements">Key Achievements</h3>
-<ol type="1">
-<li>✅ <strong>Zero Reconstruction Error</strong> - Simulated quantized vectors maintain perfect reconstruction</li>
-<li>✅ <strong>One-Sided vLUT Fix</strong> - Implemented residual-based vLUT for accurate HNLQ dot products</li>
-<li>✅ <strong>Pytest Integration</strong> - Professional test suite with fixtures and parametrization</li>
-<li>✅ <strong>Comprehensive Coverage</strong> - All lattice types (Z2, D4, E8) with various parameters</li>
-<li>✅ <strong>Performance Validation</strong> - Caching provides 1000x+ speedup</li>
-</ol>
-</section>
-</section>
-<section id="test-coverage" class="level2">
-<h2 class="anchored" data-anchor-id="test-coverage">🔍 Test Coverage</h2>
-<section id="quantized-vectors-test_quantized_vectors_pytest.py" class="level3">
-<h3 class="anchored" data-anchor-id="quantized-vectors-test_quantized_vectors_pytest.py">Quantized Vectors (<code>test_quantized_vectors_pytest.py</code>)</h3>
-<p><strong>Test Classes:</strong> - <code>TestEncoderDecoderWithSimulatedData</code> (15 tests) - Zero reconstruction error validation - Encoding/decoding shape verification</p>
-<ul>
-<li><code>TestQuantizeWrapper</code> (10 tests)
-<ul>
-<li>Consistency validation</li>
-<li>Output shape verification</li>
-</ul></li>
-<li><code>TestDifferentParameters</code> (8 tests)
-<ul>
-<li>Cross-parameter validation</li>
-</ul></li>
-<li><code>TestSimulatorValidation</code> (1 test)
-<ul>
-<li>Built-in validation checks</li>
-</ul></li>
-<li><code>TestPerformance</code> (2 tests, marked slow)
-<ul>
-<li>Encoding/decoding benchmarks</li>
-</ul></li>
-</ul>
-</section>
-<section id="one-sided-vlut-test_one_sided_vlut_pytest.py" class="level3">
-<h3 class="anchored" data-anchor-id="one-sided-vlut-test_one_sided_vlut_pytest.py">One-Sided vLUT (<code>test_one_sided_vlut_pytest.py</code>)</h3>
-<p><strong>Test Classes:</strong> - <code>TestOneSidedVLUTConstruction</code> (9 tests) - vLUT building and validation - Size and dtype verification</p>
-<ul>
-<li><code>TestOneSidedVLUTDotProductAccuracy</code> (6 tests)
-<ul>
-<li>Accuracy validation across configs</li>
-</ul></li>
-<li><code>TestOneSidedVLUTBatchProcessing</code> (1 test)
-<ul>
-<li>Batch accuracy validation</li>
-</ul></li>
-<li><code>TestOneSidedVLUTCaching</code> (3 tests)
-<ul>
-<li>Cache correctness and speedup</li>
-</ul></li>
-<li><code>TestOneSidedVLUTvsTraditional</code> (1 test)
-<ul>
-<li>Comparison with decode-then-compute</li>
-</ul></li>
-<li><code>TestOneSidedVLUTPerformance</code> (2 tests, marked slow)
-<ul>
-<li>Build time and search throughput</li>
-</ul></li>
-</ul>
-</section>
-</section>
-<section id="running-tests" class="level2">
-<h2 class="anchored" data-anchor-id="running-tests">🚀 Running Tests</h2>
-<section id="quick-start" class="level3">
-<h3 class="anchored" data-anchor-id="quick-start">Quick Start</h3>
-<div class="sourceCode" id="cb1"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> /workspace/coset</span>
-<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="bu">source</span> .venv/bin/activate</span>
-<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> pytest tests/ <span class="at">-v</span> <span class="at">-m</span> <span class="st">"not slow"</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-</section>
-<section id="with-coverage" class="level3">
-<h3 class="anchored" data-anchor-id="with-coverage">With Coverage</h3>
-<div class="sourceCode" id="cb2"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> pytest tests/ <span class="at">--cov</span><span class="op">=</span>coset <span class="at">--cov-report</span><span class="op">=</span>html</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<section id="running-tests" class="level3">
+<h3 class="anchored" data-anchor-id="running-tests">Running Tests</h3>
+<div class="sourceCode" id="cb2"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pytest</span> tests/ <span class="at">-v</span> <span class="at">-m</span> <span class="st">"not slow"</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </section>
 <section id="specific-tests" class="level3">
 <h3 class="anchored" data-anchor-id="specific-tests">Specific Tests</h3>
 <div class="sourceCode" id="cb3"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Quantized vectors only</span></span>
-<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> pytest tests/test_quantized_vectors_pytest.py <span class="at">-v</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="ex">pytest</span> tests/legacy/test_quantized_vectors_pytest.py <span class="at">-v</span></span>
 <span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="co"># One-sided vLUT only</span></span>
-<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> pytest tests/test_one_sided_vlut_pytest.py <span class="at">-v</span></span>
-<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Performance benchmarks</span></span>
-<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> pytest tests/ <span class="at">-v</span> <span class="at">-m</span> <span class="st">"slow"</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<p>See <a href="../../tests/README.md">tests/README.md</a> for complete usage guide.</p>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Performance benchmarks</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="ex">pytest</span> tests/ <span class="at">-v</span> <span class="at">-m</span> <span class="st">"slow"</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>See <a href="../tests/README.md">tests/README.md</a> for complete usage.</p>
 </section>
 </section>
-<section id="performance-highlights" class="level2">
-<h2 class="anchored" data-anchor-id="performance-highlights">📈 Performance Highlights</h2>
-<section id="one-sided-vlut" class="level3">
-<h3 class="anchored" data-anchor-id="one-sided-vlut">One-Sided vLUT</h3>
-<ul>
-<li><strong>Caching Speedup:</strong> 1370x+ for repeated queries</li>
-<li><strong>Search Throughput:</strong> 8000-9000 vectors/sec</li>
-<li><strong>vs Traditional:</strong> 3.85x faster than decode-then-compute</li>
-<li><strong>Accuracy:</strong> &lt; 1e-6 error (perfect)</li>
-</ul>
-</section>
-<section id="quantization" class="level3">
-<h3 class="anchored" data-anchor-id="quantization">Quantization</h3>
-<ul>
-<li><strong>Encoding:</strong> &gt;100K vectors/sec (D4, q=4, M=2)</li>
-<li><strong>Decoding:</strong> &gt;200K vectors/sec</li>
-<li><strong>Zero Error Rate:</strong> 90-100% for simulated vectors</li>
-</ul>
-</section>
-</section>
-<section id="key-technical-fixes" class="level2">
-<h2 class="anchored" data-anchor-id="key-technical-fixes">🔧 Key Technical Fixes</h2>
-<section id="one-sided-vlut-residual-fix" class="level3">
-<h3 class="anchored" data-anchor-id="one-sided-vlut-residual-fix">One-Sided vLUT Residual Fix</h3>
-<p><strong>Problem:</strong> - Original vLUT stored: <code>vLUT[i] = ⟨query, encoding_i @ G⟩</code> - HNLQ uses residuals: <code>x̂_i = Gb_i - q·Q(Gb_i/q)</code> - Result: Large errors (up to 73.5)</p>
-<p><strong>Solution:</strong></p>
-<div class="sourceCode" id="cb4"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Store residuals in vLUT</span></span>
-<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>residual_i <span class="op">=</span> Gb_i <span class="op">-</span> q <span class="op">*</span> Q(Gb_i <span class="op">/</span> q)</span>
-<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>vLUT[i] <span class="op">=</span> ⟨query, residual_i⟩</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<p><strong>Impact:</strong> Perfect accuracy (&lt; 1e-6 error)</p>
-</section>
-<section id="matrix-transpose-fix" class="level3">
-<h3 class="anchored" data-anchor-id="matrix-transpose-fix">Matrix Transpose Fix</h3>
-<p><strong>Problem:</strong> - Used: <code>encodings @ G</code> - Should be: <code>G @ encoding</code> (matching <code>decode_coords</code>)</p>
-<p><strong>Solution:</strong></p>
-<div class="sourceCode" id="cb5"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Use transpose for batch operations</span></span>
-<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>lattice_points <span class="op">=</span> encodings.<span class="bu">float</span>() <span class="op">@</span> <span class="va">self</span>.lattice.G.T</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<p><strong>Impact:</strong> Correct lattice point computation</p>
-</section>
-</section>
-<section id="related-documentation" class="level2">
-<h2 class="anchored" data-anchor-id="related-documentation">📚 Related Documentation</h2>
-<ul>
-<li><a href="../../tests/README.md">tests/README.md</a> - Test usage guide</li>
-<li><a href="../../examples/README.md">examples/README.md</a> - Example documentation</li>
-<li><a href="../../pytest.ini">pytest.ini</a> - Pytest configuration</li>
-</ul>
-</section>
-<section id="use-cases-demonstrated" class="level2">
-<h2 class="anchored" data-anchor-id="use-cases-demonstrated">🎯 Use Cases Demonstrated</h2>
-<section id="examples-examplesone_sided_vlut_search.py" class="level3">
-<h3 class="anchored" data-anchor-id="examples-examplesone_sided_vlut_search.py">Examples (<code>examples/one_sided_vlut_search.py</code>)</h3>
-<ol type="1">
-<li><strong>Semantic Search</strong> - 1000 documents, 8783 docs/sec</li>
-<li><strong>Batch Queries</strong> - 10 queries, 4717 comparisons/sec</li>
-<li><strong>Caching</strong> - 1596x speedup, 5103x effective for 100 queries</li>
-<li><strong>k-NN Search</strong> - 2000 vectors, top-10 retrieval</li>
-<li><strong>Performance Comparison</strong> - 3.85x vs traditional</li>
-</ol>
-</section>
-</section>
-<section id="version-history" class="level2">
-<h2 class="anchored" data-anchor-id="version-history">📝 Version History</h2>
-<section id="v0.27-current" class="level3">
-<h3 class="anchored" data-anchor-id="v0.27-current">v0.27 (Current)</h3>
-<ul>
-<li>Complete pytest test suite (58 tests)</li>
-<li>Fixed one-sided vLUT with residuals</li>
-<li>Practical vector search examples</li>
-<li>Comprehensive documentation</li>
-</ul>
-</section>
-<section id="previous-versions" class="level3">
-<h3 class="anchored" data-anchor-id="previous-versions">Previous Versions</h3>
-<ul>
-<li>v0.26: Cleanup and reorganization</li>
-<li>v0.25: E8 HNLQ vLUT implementation</li>
-<li>Earlier: Initial implementations</li>
-</ul>
-</section>
-</section>
-<section id="contributing" class="level2">
-<h2 class="anchored" data-anchor-id="contributing">🤝 Contributing</h2>
-<p>When adding new tests: 1. Follow pytest conventions (fixtures, parametrization) 2. Add to appropriate test file or create new one 3. Mark slow tests with <code>@pytest.mark.slow</code> 4. Update this documentation 5. Ensure all tests pass before committing</p>
-</section>
-<section id="contact" class="level2">
-<h2 class="anchored" data-anchor-id="contact">📧 Contact</h2>
-<p>For questions or issues related to testing: - See test failures in CI/CD logs - Check test output with <code>-vv</code> flag - Review test documentation in this archive</p>
-<hr>
-<p><strong>Last Updated:</strong> 2025-09-30<br>
-<strong>Status:</strong> All tests passing ✅<br>
-<strong>Coverage:</strong> Comprehensive<br>
-<strong>Maintenance:</strong> Active</p>
+<section id="current-focus" class="level2">
+<h2 class="anchored" data-anchor-id="current-focus">Current Focus</h2>
+<p>The supported API focuses on: - <strong>QAT Layers</strong> - <code>create_e8_hnlq_linear</code>, <code>HNLQLinear</code> - <strong>E8 and D4</strong> lattice quantization - <strong>Quantized vectors</strong> - Encoding/decoding validation</p>
+<p>Legacy tests cover deprecated modules for backward compatibility.</p>
 
 
 </section>
@@ -477,7 +302,7 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
   }
     var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
     var mailtoRegex = new RegExp(/^mailto:/);
-      var filterRegex = new RegExp('/' + window.location.host + '/');
+      var filterRegex = new RegExp("https:\/\/mlsquare\.github\.io\/coset\/");
     var isInternal = (href) => {
         return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
     }
