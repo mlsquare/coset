@@ -109,7 +109,7 @@
     "href": "test-summaries/README.html",
     "title": "Test Documentation Archive",
     "section": "",
-    "text": "Documentation for the COSET test suite.\n\n\n\n\n\nTESTING_SUMMARY - Testing overview\nPYTEST_CONVERSION_SUMMARY - Pytest structure\n\n\n\n\n\n\n\ntests/\n└── legacy/\n    ├── test_lattices.py\n    ├── test_nn.py\n    ├── test_quant.py\n    ├── test_one_sided_vlut_pytest.py\n    └── test_quantized_vectors_pytest.py\n\n\n\npytest tests/ -v -m \"not slow\"\n\n\n\n# Quantized vectors only\npytest tests/legacy/test_quantized_vectors_pytest.py -v\n\n# Performance benchmarks\npytest tests/ -v -m \"slow\"\nSee tests/README.md for complete usage.\n\n\n\n\nThe supported API focuses on: - QAT Layers - create_e8_hnlq_linear, HNLQLinear - E8 and D4 lattice quantization - Quantized vectors - Encoding/decoding validation\nLegacy tests cover deprecated modules for backward compatibility."
+    "text": "Documentation for the COSET test suite.\n\n\n\n\n\nTESTING_SUMMARY - Testing overview\nPYTEST_CONVERSION_SUMMARY - Pytest structure\n\n\n\n\n\n\n\ntests/\n└── legacy/\n    ├── test_lattices.py\n    ├── test_nn.py\n    ├── test_quant.py\n    └── test_quantized_vectors_pytest.py\n\n\n\npytest tests/ -v -m \"not slow\"\n\n\n\n# Quantized vectors only\npytest tests/legacy/test_quantized_vectors_pytest.py -v\n\n# Performance benchmarks\npytest tests/ -v -m \"slow\"\nSee tests/README.md for complete usage.\n\n\n\n\nThe supported API focuses on: - QAT Layers - create_e8_hnlq_linear, HNLQLinear - E8 and D4 lattice quantization - Quantized vectors - Encoding/decoding validation\nLegacy tests cover deprecated modules for backward compatibility."
   },
   {
     "objectID": "test-summaries/README.html#contents",
@@ -123,7 +123,7 @@
     "href": "test-summaries/README.html#quick-reference",
     "title": "Test Documentation Archive",
     "section": "",
-    "text": "tests/\n└── legacy/\n    ├── test_lattices.py\n    ├── test_nn.py\n    ├── test_quant.py\n    ├── test_one_sided_vlut_pytest.py\n    └── test_quantized_vectors_pytest.py\n\n\n\npytest tests/ -v -m \"not slow\"\n\n\n\n# Quantized vectors only\npytest tests/legacy/test_quantized_vectors_pytest.py -v\n\n# Performance benchmarks\npytest tests/ -v -m \"slow\"\nSee tests/README.md for complete usage."
+    "text": "tests/\n└── legacy/\n    ├── test_lattices.py\n    ├── test_nn.py\n    ├── test_quant.py\n    └── test_quantized_vectors_pytest.py\n\n\n\npytest tests/ -v -m \"not slow\"\n\n\n\n# Quantized vectors only\npytest tests/legacy/test_quantized_vectors_pytest.py -v\n\n# Performance benchmarks\npytest tests/ -v -m \"slow\"\nSee tests/README.md for complete usage."
   },
   {
     "objectID": "test-summaries/README.html#current-focus",

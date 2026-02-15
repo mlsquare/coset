@@ -13,7 +13,6 @@ tests/
     ├── test_lattices.py              # Z2, D4, E8 lattice tests
     ├── test_nn.py                    # QLinear tests
     ├── test_quant.py                 # Quantization functions
-    ├── test_one_sided_vlut_pytest.py # One-sided vLUT operations
     └── test_quantized_vectors_pytest.py # Quantized vector operations
 ```
 
@@ -25,7 +24,6 @@ Tests for backward compatibility with the deprecated `coset.legacy` modules:
 - **Lattice operations** - Z2, D4, E8 nearest-neighbor quantization
 - **Neural network layers** - QLinear with quantization
 - **Quantization functions** - encode, decode, quantize
-- **vLUT operations** - One-sided value lookup tables
 - **Simulated quantization** - Vector simulator tests
 
 These tests ensure the legacy API continues to work for backward compatibility.
@@ -146,14 +144,6 @@ markers =
 - ✅ MAC modulo-q operations
 - ✅ Accumulate modulo-q
 - ✅ Batch operations
-
-### vLUT (`test_one_sided_vlut_pytest.py`)
-- ✅ vLUT construction
-- ✅ Dot product accuracy
-- ✅ Batch processing
-- ✅ Caching mechanism
-- ✅ vs traditional decode-then-compute
-- ✅ Performance benchmarks
 
 ### Quantized Vectors (`test_quantized_vectors_pytest.py`)
 - ✅ Zero reconstruction error
