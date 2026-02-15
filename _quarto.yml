@@ -1,0 +1,28 @@
+project:
+  type: website
+  output-dir: docs
+  resources: .nojekyll
+  render:
+    - index.qmd
+    - project.qmd
+    - paper.qmd
+    - test-summaries/README.md
+    - test-summaries/*.md
+
+website:
+  title: "Coset"
+  page-navigation: true
+  navbar:
+    left:
+      - href: index.qmd
+        text: Home
+      - href: project.qmd
+        text: Documentation
+      - href: paper.qmd
+        text: Publication
+      - href: test-summaries/README.html
+        text: Test Docs
+    right:
+      - icon: github
+        href: https://github.com/coset/coset
+        text: Source

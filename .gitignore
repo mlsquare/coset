@@ -214,3 +214,5 @@ mlruns/
 # OS
 .DS_Store
 Thumbs.db
+
+/.quarto/

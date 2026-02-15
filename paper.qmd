@@ -1,0 +1,38 @@
+---
+title: "Publication"
+---
+
+# Lattice-Based Vector Quantization for Low-Bit Quantization-Aware Training
+
+**Authors:** Rishika Kohli, Soma S. Dhavala, Shaifu Gupta, Manoj Singh Gaur  
+**Affiliation:** Indian Institute of Technology, Jammu
+
+## Publication Status
+
+- **Venue:** CPAL Conference
+- **To appear in:** PMLR 2026
+- **OpenReview:** [Link will be added when available]
+
+## Abstract
+
+Quantization is an effective approach for deploying deep learning models on resource-constrained hardware, but maintaining accuracy and training stability at extreme low precision remains a major challenge. In this work, we study lattice-based vector quantization (VQ) as a practical alternative to scalar quantization for low-bit quantization-aware training (QAT). We develop a unified quantization pipeline that integrates structured lattice projections into both QAT and post-training quantization (PTQ), supporting multiple lattice choices—including E8 and D4—via a fused projection operator with straight-through estimation.
+
+Through extensive experiments across a wide range of bit-widths, lattice parameterizations, and training regimes, we show that lattice-based VQ consistently enables stable training and meaningful accuracy below 2 bits, where scalar quantization and existing PTQ methods typically underperform or are unavailable. In this low-bit regime, exploiting geometric structure across weight blocks improves robustness by reducing overload and stabilizing optimization, while at moderate and higher bit-widths, performance differences narrow and simpler quantization schemes become sufficient. We further analyze the role of lattice choice, dynamic-range scaling, and overload behavior, and demonstrate that explicit overload control is central to reliable low-bit performance. Finally, we show that lattice-based QAT extends beyond binary classification and weight-only quantization, supporting multi-class tasks, joint weight–activation quantization, and transformer encoders such as BERT, achieving substantial compression with controlled accuracy degradation.
+
+## Related Work
+
+This library implements the methodology described in the paper. See the [Documentation](project.qmd) for API details and usage.
+
+## Citation
+
+If you use this library or the paper in your research, please cite:
+
+```bibtex
+@inproceedings{kohli2026lattice,
+  title={Lattice-Based Vector Quantization for Low-Bit Quantization-Aware Training},
+  author={Kohli, Rishika and Dhavala, Soma S. and Gupta, Shaifu and Gaur, Manoj Singh},
+  booktitle={Proceedings of the CPAL Conference},
+  year={2026},
+  publisher={PMLR}
+}
+```
