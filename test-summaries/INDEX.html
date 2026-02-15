@@ -20,6 +20,40 @@ ul.task-list li input[type="checkbox"] {
   margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
   vertical-align: middle;
 }
+/* CSS for syntax highlighting */
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { display: inline-block; text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
 </style>
 
 
@@ -130,199 +164,19 @@ ul.task-list li input[type="checkbox"] {
 
 <section id="test-documentation-index" class="level1">
 <h1>Test Documentation Index</h1>
-<p>Quick reference index for all test-related documentation.</p>
-<section id="documents-in-this-archive" class="level2">
-<h2 class="anchored" data-anchor-id="documents-in-this-archive">📚 Documents in this Archive</h2>
-<section id="readme.md" class="level3">
-<h3 class="anchored" data-anchor-id="readme.md">1. <a href="../test-summaries/README.html">README.md</a></h3>
-<p><strong>Main archive index with quick reference</strong></p>
+<p>Quick reference for test documentation.</p>
+<section id="documents" class="level2">
+<h2 class="anchored" data-anchor-id="documents">Documents</h2>
 <ul>
-<li>Test statistics and metrics</li>
-<li>Coverage breakdown</li>
-<li>Running instructions</li>
-<li>Performance highlights</li>
-<li>Key technical fixes</li>
-<li>Version history</li>
+<li><strong><a href="README.html">README</a></strong> - Main test documentation</li>
+<li><strong><a href="TESTING_SUMMARY.html">TESTING_SUMMARY</a></strong> - Testing overview</li>
+<li><strong><a href="PYTEST_CONVERSION_SUMMARY.html">PYTEST_CONVERSION_SUMMARY</a></strong> - Pytest structure</li>
 </ul>
 </section>
-<section id="testing_summary.md" class="level3">
-<h3 class="anchored" data-anchor-id="testing_summary.md">2. <a href="../test-summaries/TESTING_SUMMARY.html">TESTING_SUMMARY.md</a></h3>
-<p><strong>Complete testing overview (276 lines)</strong></p>
-<p>Contents: - Test 1: Quantized Vectors Testing - Results and validation - Key findings - Test structure</p>
-<ul>
-<li>Test 2: One-Sided vLUT Testing
-<ul>
-<li>Initial problems discovered</li>
-<li>Fixes applied</li>
-<li>Performance metrics</li>
-</ul></li>
-<li>Practical Examples
-<ul>
-<li>5 real-world examples</li>
-<li>Performance summaries</li>
-</ul></li>
-<li>Technical Architecture
-<ul>
-<li>One-sided vLUT design</li>
-<li>Implementation details</li>
-</ul></li>
-<li>Files Created
-<ul>
-<li>Complete file listing</li>
-<li>Line counts</li>
-</ul></li>
-<li>Impact and Contributions
-<ul>
-<li>Core library fixes</li>
-<li>Test coverage</li>
-<li>Practical examples</li>
-</ul></li>
-</ul>
-</section>
-<section id="pytest_conversion_summary.md" class="level3">
-<h3 class="anchored" data-anchor-id="pytest_conversion_summary.md">3. <a href="../test-summaries/PYTEST_CONVERSION_SUMMARY.html">PYTEST_CONVERSION_SUMMARY.md</a></h3>
-<p><strong>Pytest conversion details (361 lines)</strong></p>
-<p>Contents: - Overview of conversion - File structure - Quantized vectors tests (34 tests) - One-sided vLUT tests (24 tests)</p>
-<ul>
-<li>Test Results
-<ul>
-<li>Fast tests: 54 passed</li>
-<li>All tests: 58 passed</li>
-</ul></li>
-<li>Key Features
-<ul>
-<li>Fixtures</li>
-<li>Parametrization</li>
-<li>Markers</li>
-<li>Class organization</li>
-</ul></li>
-<li>Coverage details
-<ul>
-<li>Test breakdown by class</li>
-<li>Expected results</li>
-</ul></li>
-<li>Advantages of Pytest
-<ul>
-<li>Better organization</li>
-<li>CI/CD integration</li>
-<li>Plugin ecosystem</li>
-</ul></li>
-<li>Running Tests
-<ul>
-<li>Basic usage</li>
-<li>Debugging</li>
-</ul></li>
-<li>Migration Guide
-<ul>
-<li>Before/after comparison</li>
-<li>Benefits achieved</li>
-</ul></li>
-<li>Next Steps
-<ul>
-<li>Enhancements</li>
-<li>CI configuration</li>
-</ul></li>
-</ul>
-</section>
-</section>
-<section id="quick-navigation" class="level2">
-<h2 class="anchored" data-anchor-id="quick-navigation">🔍 Quick Navigation</h2>
-<section id="by-topic" class="level3">
-<h3 class="anchored" data-anchor-id="by-topic">By Topic</h3>
-<p><strong>Testing Results:</strong> - TESTING_SUMMARY.md → Results sections - README.md → Quick Reference section</p>
-<p><strong>Pytest Setup:</strong> - PYTEST_CONVERSION_SUMMARY.md → Running Tests - README.md → Running Tests section</p>
-<p><strong>Performance Metrics:</strong> - TESTING_SUMMARY.md → Performance Summary - README.md → Performance Highlights</p>
-<p><strong>Technical Details:</strong> - TESTING_SUMMARY.md → Technical Architecture - TESTING_SUMMARY.md → Key Technical Fixes</p>
-<p><strong>CI/CD Integration:</strong> - PYTEST_CONVERSION_SUMMARY.md → Next Steps - README.md → Quick Start</p>
-</section>
-<section id="by-use-case" class="level3">
-<h3 class="anchored" data-anchor-id="by-use-case">By Use Case</h3>
-<p><strong>“I want to run tests”</strong> → README.md (🚀 Running Tests)</p>
-<p><strong>“I want to understand test coverage”</strong> → README.md (🔍 Test Coverage)</p>
-<p><strong>“I want to know about the vLUT fix”</strong> → TESTING_SUMMARY.md (Test 2: One-Sided vLUT Testing) → README.md (🔧 Key Technical Fixes)</p>
-<p><strong>“I want to add new tests”</strong> → PYTEST_CONVERSION_SUMMARY.md (Migration Guide) → README.md (🤝 Contributing)</p>
-<p><strong>“I want performance benchmarks”</strong> → TESTING_SUMMARY.md (Performance Summary) → README.md (📈 Performance Highlights)</p>
-<p><strong>“I need CI/CD setup”</strong> → PYTEST_CONVERSION_SUMMARY.md (Next Steps → CI Configuration)</p>
-</section>
-</section>
-<section id="document-statistics" class="level2">
-<h2 class="anchored" data-anchor-id="document-statistics">📊 Document Statistics</h2>
-<table class="caption-top table">
-<thead>
-<tr class="header">
-<th>Document</th>
-<th>Lines</th>
-<th>Focus</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td>README.md</td>
-<td>184</td>
-<td>Quick reference &amp; index</td>
-</tr>
-<tr class="even">
-<td>TESTING_SUMMARY.md</td>
-<td>276</td>
-<td>Complete testing overview</td>
-</tr>
-<tr class="odd">
-<td>PYTEST_CONVERSION_SUMMARY.md</td>
-<td>361</td>
-<td>Pytest migration details</td>
-</tr>
-<tr class="even">
-<td>INDEX.md (this file)</td>
-<td>-</td>
-<td>Navigation guide</td>
-</tr>
-</tbody>
-</table>
-<p><strong>Total Documentation:</strong> ~821+ lines</p>
-</section>
-<section id="key-highlights" class="level2">
-<h2 class="anchored" data-anchor-id="key-highlights">🎯 Key Highlights</h2>
-<section id="test-results" class="level3">
-<h3 class="anchored" data-anchor-id="test-results">Test Results</h3>
-<p>✅ <strong>58 tests total</strong> (54 fast + 4 slow)<br>
-✅ <strong>100% pass rate</strong><br>
-✅ <strong>~55s runtime</strong> (fast tests)</p>
-</section>
-<section id="major-fixes" class="level3">
-<h3 class="anchored" data-anchor-id="major-fixes">Major Fixes</h3>
-<p>✅ <strong>One-sided vLUT</strong> - Residual-based implementation<br>
-✅ <strong>Matrix transpose</strong> - Correct G.T usage<br>
-✅ <strong>Perfect accuracy</strong> - &lt; 1e-6 error</p>
-</section>
-<section id="performance" class="level3">
-<h3 class="anchored" data-anchor-id="performance">Performance</h3>
-<p>✅ <strong>1370x caching speedup</strong><br>
-✅ <strong>8000-9000 vectors/sec</strong> search throughput<br>
-✅ <strong>3.85x vs traditional</strong> decode-then-compute</p>
-</section>
-</section>
-<section id="version-history" class="level2">
-<h2 class="anchored" data-anchor-id="version-history">🔄 Version History</h2>
-<section id="v0.27-current" class="level3">
-<h3 class="anchored" data-anchor-id="v0.27-current">v0.27 (Current)</h3>
-<ul>
-<li>Created test documentation archive</li>
-<li>Organized all test summaries</li>
-<li>Added comprehensive indexing</li>
-<li>All tests passing</li>
-</ul>
-</section>
-</section>
-<section id="need-help" class="level2">
-<h2 class="anchored" data-anchor-id="need-help">📧 Need Help?</h2>
-<p><strong>Finding Information:</strong> 1. Start with README.md for overview 2. Use this INDEX.md for navigation 3. Dive into specific documents for details</p>
-<p><strong>Running Tests:</strong> → See README.md or PYTEST_CONVERSION_SUMMARY.md</p>
-<p><strong>Understanding Fixes:</strong> → See TESTING_SUMMARY.md (Section: One-Sided vLUT Testing)</p>
-<p><strong>Adding Tests:</strong> → See PYTEST_CONVERSION_SUMMARY.md (Migration Guide)</p>
-<hr>
-<p><strong>Last Updated:</strong> 2025-09-30<br>
-<strong>Maintained by:</strong> COSET Development Team<br>
-<strong>Status:</strong> Active and Complete ✅</p>
+<section id="running-tests" class="level2">
+<h2 class="anchored" data-anchor-id="running-tests">Running Tests</h2>
+<div class="sourceCode" id="cb1"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pytest</span> tests/ <span class="at">-v</span> <span class="at">-m</span> <span class="st">"not slow"</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>See <a href="../tests/README.md">tests/README.md</a> for complete usage.</p>
 
 
 </section>

@@ -162,39 +162,25 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 
 
 
-<section id="coset-testing-and-examples-summary" class="level1">
-<h1>COSET Testing and Examples Summary</h1>
-<p>This document summarizes the comprehensive testing and examples created for the COSET library, focusing on quantized vector operations and one-sided vLUT functionality.</p>
+<section id="coset-testing-summary" class="level1">
+<h1>COSET Testing Summary</h1>
+<p>Overview of testing for the COSET library.</p>
 <section id="overview" class="level2">
 <h2 class="anchored" data-anchor-id="overview">Overview</h2>
-<p>We created two main test suites and one practical example demonstrating real-world applications of hierarchical nested-lattice quantization (HNLQ) and value lookup tables (vLUTs).</p>
-<hr>
+<p>The test suite covers quantization operations and the supported API. The main supported API focuses on QAT layers (<code>create_e8_hnlq_linear</code>, <code>HNLQLinear</code>) for quantization-aware training.</p>
 </section>
-<section id="quantized-vector-testing-test_quantized_vectors.py" class="level2">
-<h2 class="anchored" data-anchor-id="quantized-vector-testing-test_quantized_vectors.py">1. Quantized Vector Testing (<code>test_quantized_vectors.py</code>)</h2>
-<section id="purpose" class="level3">
-<h3 class="anchored" data-anchor-id="purpose">Purpose</h3>
-<p>Validate encoder/decoder with simulated quantized data to ensure zero reconstruction error.</p>
-</section>
-<section id="key-features" class="level3">
-<h3 class="anchored" data-anchor-id="key-features">Key Features</h3>
-<ul>
-<li>Uses <code>LatticeVectorSimulator</code> from <code>sim.py</code> to generate proper quantized vectors</li>
-<li>Tests encoder, decoder, and quantize wrapper functions</li>
-<li>Validates zero reconstruction error for vectors already in quantized space</li>
-</ul>
-</section>
-<section id="test-results" class="level3">
-<h3 class="anchored" data-anchor-id="test-results">Test Results ✅</h3>
+<section id="test-suites" class="level2">
+<h2 class="anchored" data-anchor-id="test-suites">Test Suites</h2>
+<section id="quantized-vector-testing" class="level3">
+<h3 class="anchored" data-anchor-id="quantized-vector-testing">Quantized Vector Testing</h3>
+<p>Validates encoder/decoder with simulated quantized data.</p>
 <table class="caption-top table">
 <thead>
 <tr class="header">
 <th>Lattice</th>
 <th>q</th>
 <th>M</th>
-<th>Vectors</th>
 <th>Zero Error Rate</th>
-<th>Status</th>
 </tr>
 </thead>
 <tbody>
@@ -202,431 +188,44 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <td>Z2</td>
 <td>3</td>
 <td>2</td>
-<td>20</td>
 <td>100%</td>
-<td>✅ PASS</td>
 </tr>
 <tr class="even">
 <td>D4</td>
 <td>3</td>
 <td>2</td>
-<td>20</td>
 <td>100%</td>
-<td>✅ PASS</td>
 </tr>
 <tr class="odd">
 <td>E8</td>
 <td>3</td>
 <td>2</td>
-<td>20</td>
 <td>95%</td>
-<td>✅ PASS</td>
 </tr>
 <tr class="even">
 <td>D4</td>
 <td>4</td>
 <td>2</td>
-<td>20</td>
 <td>100%</td>
-<td>✅ PASS</td>
 </tr>
 <tr class="odd">
 <td>E8</td>
 <td>4</td>
 <td>3</td>
-<td>20</td>
 <td>100%</td>
-<td>✅ PASS</td>
-</tr>
-</tbody>
-</table>
-<p><strong>Quantize Wrapper Test:</strong> - 15/15 vectors: 100% consistency - Re-quantization produces identical results - Perfect idempotency</p>
-<p><strong>Built-in Simulator Validation:</strong> - 50/50 vectors: 100% exact reconstruction - Zero mean, max, and std error - Tolerance: 1e-06</p>
-</section>
-<section id="key-findings" class="level3">
-<h3 class="anchored" data-anchor-id="key-findings">Key Findings</h3>
-<ol type="1">
-<li>✅ Simulated quantized vectors maintain zero reconstruction error</li>
-<li>✅ Encoder/decoder pipeline works correctly</li>
-<li>✅ Quantize wrapper is consistent and idempotent</li>
-<li>✅ All lattice types (Z2, D4, E8) work as expected</li>
-</ol>
-<hr>
-</section>
-</section>
-<section id="one-sided-vlut-testing-test_one_sided_vlut.py" class="level2">
-<h2 class="anchored" data-anchor-id="one-sided-vlut-testing-test_one_sided_vlut.py">2. One-Sided vLUT Testing (<code>test_one_sided_vlut.py</code>)</h2>
-<section id="purpose-1" class="level3">
-<h3 class="anchored" data-anchor-id="purpose-1">Purpose</h3>
-<p>Test one-sided vLUT for efficient dot product computation between unquantized queries and quantized data.</p>
-</section>
-<section id="initial-problem-discovered" class="level3">
-<h3 class="anchored" data-anchor-id="initial-problem-discovered">Initial Problem Discovered</h3>
-<p>The original vLUT implementation had a fundamental design mismatch: - <strong>Original vLUT</strong>: <code>vLUT[i] = ⟨query, encoding_i @ G⟩</code> - <strong>HNLQ decode</strong>: Uses residual-based reconstruction: <code>x̂_i = Gb_i - q·Q(Gb_i/q)</code> - <strong>Result</strong>: Large errors (up to 73.5) in dot product computation</p>
-</section>
-<section id="fixes-applied" class="level3">
-<h3 class="anchored" data-anchor-id="fixes-applied">Fixes Applied</h3>
-<section id="fix-1-store-residuals-in-vlut" class="level4">
-<h4 class="anchored" data-anchor-id="fix-1-store-residuals-in-vlut">Fix 1: Store Residuals in vLUT</h4>
-<p>Changed vLUT to store residuals instead of raw lattice points:</p>
-<div class="sourceCode" id="cb1"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a>residual_i <span class="op">=</span> Gb_i <span class="op">-</span> q <span class="op">*</span> Q(Gb_i <span class="op">/</span> q)</span>
-<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>vLUT[i] <span class="op">=</span> ⟨query, residual_i⟩</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-</section>
-<section id="fix-2-correct-matrix-multiplication" class="level4">
-<h4 class="anchored" data-anchor-id="fix-2-correct-matrix-multiplication">Fix 2: Correct Matrix Multiplication</h4>
-<p>Fixed transpose issue in <code>_decode_encodings_to_lattice_points</code>:</p>
-<div class="sourceCode" id="cb2"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Before: encodings @ G</span></span>
-<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="co"># After:  encodings @ G.T</span></span>
-<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>lattice_points <span class="op">=</span> encodings.<span class="bu">float</span>() <span class="op">@</span> <span class="va">self</span>.lattice.G.T</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<p>This makes it equivalent to <code>G @ encoding</code>, matching <code>decode_coords</code> implementation.</p>
-</section>
-</section>
-<section id="test-results-after-fix" class="level3">
-<h3 class="anchored" data-anchor-id="test-results-after-fix">Test Results After Fix ✅</h3>
-<table class="caption-top table">
-<colgroup>
-<col style="width: 20%">
-<col style="width: 26%">
-<col style="width: 26%">
-<col style="width: 26%">
-</colgroup>
-<thead>
-<tr class="header">
-<th>Test</th>
-<th>Metric</th>
-<th>Result</th>
-<th>Status</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td>D4 Dot Product Accuracy</td>
-<td>Error</td>
-<td>0.0</td>
-<td>✅ 100%</td>
-</tr>
-<tr class="even">
-<td>E8 Batch Processing (3 queries, 50 vecs)</td>
-<td>Mean Error</td>
-<td>&lt; 1e-8</td>
-<td>✅ Perfect</td>
-</tr>
-<tr class="odd">
-<td>vLUT Caching</td>
-<td>Speedup</td>
-<td>1370x+</td>
-<td>✅ Excellent</td>
-</tr>
-<tr class="even">
-<td>All Parameters (6 configs)</td>
-<td>Error</td>
-<td>0.0</td>
-<td>✅ 100%</td>
 </tr>
 </tbody>
 </table>
 </section>
-<section id="performance-metrics" class="level3">
-<h3 class="anchored" data-anchor-id="performance-metrics">Performance Metrics</h3>
-<table class="caption-top table">
-<thead>
-<tr class="header">
-<th>Operation</th>
-<th>Time</th>
-<th>Speedup</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td>First vLUT build</td>
-<td>~47ms</td>
-<td>-</td>
-</tr>
-<tr class="even">
-<td>Cached vLUT lookup</td>
-<td>~0.03ms</td>
-<td><strong>1370x</strong></td>
-</tr>
-<tr class="odd">
-<td>D4 (q=3, M=2) accuracy</td>
-<td>0.0 error</td>
-<td>✅ Perfect</td>
-</tr>
-<tr class="even">
-<td>E8 (q=3, M=2) accuracy</td>
-<td>~1e-8 error</td>
-<td>✅ Perfect</td>
-</tr>
-</tbody>
-</table>
-</section>
-<section id="key-findings-1" class="level3">
-<h3 class="anchored" data-anchor-id="key-findings-1">Key Findings</h3>
-<ol type="1">
-<li>✅ One-sided vLUT now works perfectly with residual-based quantization</li>
-<li>✅ 100% accuracy (zero error) across all lattice types</li>
-<li>✅ 1370x+ speedup from query-specific vLUT caching</li>
-<li>✅ Matrix transpose fix ensures correct lattice point computation</li>
-</ol>
-<hr>
+<section id="legacy-tests" class="level3">
+<h3 class="anchored" data-anchor-id="legacy-tests">Legacy Tests</h3>
+<p>Legacy tests in <code>tests/legacy/</code> cover deprecated modules (lattices, quant, nn) for backward compatibility. These are not part of the current supported API.</p>
 </section>
 </section>
-<section id="practical-examples-examplesone_sided_vlut_search.py" class="level2">
-<h2 class="anchored" data-anchor-id="practical-examples-examplesone_sided_vlut_search.py">3. Practical Examples (<code>examples/one_sided_vlut_search.py</code>)</h2>
-<section id="purpose-2" class="level3">
-<h3 class="anchored" data-anchor-id="purpose-2">Purpose</h3>
-<p>Demonstrate real-world applications of one-sided vLUT for vector search and retrieval.</p>
-</section>
-<section id="examples-included" class="level3">
-<h3 class="anchored" data-anchor-id="examples-included">Examples Included</h3>
-<section id="example-1-semantic-search-with-quantized-embeddings" class="level4">
-<h4 class="anchored" data-anchor-id="example-1-semantic-search-with-quantized-embeddings">Example 1: Semantic Search with Quantized Embeddings</h4>
-<ul>
-<li><strong>Database</strong>: 1000 quantized E8 document embeddings</li>
-<li><strong>Performance</strong>:
-<ul>
-<li>Encoding: 974 docs/sec</li>
-<li>vLUT build: 2.4s (one-time per query)</li>
-<li>Search: 9046 docs/sec</li>
-</ul></li>
-<li><strong>Use Case</strong>: Search engine with compressed embeddings</li>
-</ul>
-</section>
-<section id="example-2-batch-query-processing" class="level4">
-<h4 class="anchored" data-anchor-id="example-2-batch-query-processing">Example 2: Batch Query Processing</h4>
-<ul>
-<li><strong>Setup</strong>: 10 queries against 500 D4 vectors</li>
-<li><strong>Performance</strong>:
-<ul>
-<li>Average per query: 100ms</li>
-<li>Throughput: 4971 comparisons/sec</li>
-</ul></li>
-<li><strong>Use Case</strong>: Multi-user search system</li>
-</ul>
-</section>
-<section id="example-3-repeated-query-caching" class="level4">
-<h4 class="anchored" data-anchor-id="example-3-repeated-query-caching">Example 3: Repeated Query Caching</h4>
-<ul>
-<li><strong>Speedup</strong>: 1021x from first to second execution</li>
-<li><strong>100 Repeated Queries</strong>: 5182x effective speedup</li>
-<li><strong>Use Case</strong>: Pagination, filtering, query refinement</li>
-</ul>
-</section>
-<section id="example-4-k-nearest-neighbors" class="level4">
-<h4 class="anchored" data-anchor-id="example-4-k-nearest-neighbors">Example 4: K-Nearest Neighbors</h4>
-<ul>
-<li><strong>Database</strong>: 2000 E8 vectors</li>
-<li><strong>k</strong>: 10 neighbors</li>
-<li><strong>Performance</strong>:
-<ul>
-<li>Total: 2.7s</li>
-<li>Search only: 222ms (9001 vecs/sec)</li>
-</ul></li>
-<li><strong>Accuracy</strong>: Perfect (&lt; 1e-6 error)</li>
-<li><strong>Use Case</strong>: Similarity search, recommendation systems</li>
-</ul>
-</section>
-<section id="example-5-performance-comparison" class="level4">
-<h4 class="anchored" data-anchor-id="example-5-performance-comparison">Example 5: Performance Comparison</h4>
-<ul>
-<li><strong>vLUT Approach</strong>: 119ms (8370 vecs/sec)</li>
-<li><strong>Traditional Decode+Compute</strong>: 460ms (2175 vecs/sec)</li>
-<li><strong>Speedup</strong>: <strong>3.85x</strong> with perfect accuracy</li>
-<li><strong>Use Case</strong>: Demonstrates vLUT advantage</li>
-</ul>
-</section>
-</section>
-<section id="performance-summary" class="level3">
-<h3 class="anchored" data-anchor-id="performance-summary">Performance Summary</h3>
-<table class="caption-top table">
-<thead>
-<tr class="header">
-<th>Metric</th>
-<th>Value</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td>Dot Product Accuracy</td>
-<td>&lt; 1e-7 error</td>
-<td>Perfect accuracy maintained</td>
-</tr>
-<tr class="even">
-<td>Caching Speedup</td>
-<td>1000-5000x</td>
-<td>For repeated queries</td>
-</tr>
-<tr class="odd">
-<td>vs Decode-then-compute</td>
-<td>3.85x</td>
-<td>One-time query speedup</td>
-</tr>
-<tr class="even">
-<td>Throughput (E8)</td>
-<td>9000 docs/sec</td>
-<td>Search performance</td>
-</tr>
-<tr class="odd">
-<td>Throughput (D4)</td>
-<td>8370 vecs/sec</td>
-<td>Search performance</td>
-</tr>
-</tbody>
-</table>
-<hr>
-</section>
-</section>
-<section id="technical-architecture" class="level2">
-<h2 class="anchored" data-anchor-id="technical-architecture">Technical Architecture</h2>
-<section id="one-sided-vlut-design" class="level3">
-<h3 class="anchored" data-anchor-id="one-sided-vlut-design">One-Sided vLUT Design</h3>
-<p><strong>Construction</strong> (once per query):</p>
-<div class="sourceCode" id="cb3"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>For each possible encoding i <span class="kw">in</span> [<span class="dv">0</span>, q<span class="op">^</span>d):</span>
-<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>  Gb_i <span class="op">=</span> encoding_i <span class="op">@</span> G.T          <span class="co"># Decode to lattice point</span></span>
-<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>  residual_i <span class="op">=</span> Gb_i <span class="op">-</span> q·Q(Gb_i<span class="op">/</span>q)  <span class="co"># Compute residual</span></span>
-<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>  vLUT[i] <span class="op">=</span> ⟨query, residual_i⟩    <span class="co"># Store inner product</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<p><strong>Dot Product Computation</strong> (fast lookup):</p>
-<div class="sourceCode" id="cb4"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>For quantized vector x̂ <span class="cf">with</span> encodings {b₀, b₁, ..., b_{M<span class="op">-</span><span class="dv">1</span>}}:</span>
-<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>  result <span class="op">=</span> <span class="dv">0</span></span>
-<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>  <span class="cf">for</span> i <span class="kw">in</span> <span class="bu">range</span>(M):</span>
-<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>    idx <span class="op">=</span> encoding_to_index(bᵢ)</span>
-<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>    result <span class="op">+=</span> q<span class="op">^</span>i · vLUT[idx]</span>
-<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>  <span class="cf">return</span> result</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-</section>
-<section id="key-implementation-details" class="level3">
-<h3 class="anchored" data-anchor-id="key-implementation-details">Key Implementation Details</h3>
-<ol type="1">
-<li><strong>Residual-Based Storage</strong>: vLUT stores inner products with residuals, not raw lattice points</li>
-<li><strong>Correct Matrix Multiplication</strong>: <code>encoding @ G.T</code> matches <code>G @ encoding</code> from <code>decode_coords</code></li>
-<li><strong>Hierarchical Accumulation</strong>: Results summed with <code>q^i</code> weights for each layer</li>
-<li><strong>Query-Specific Caching</strong>: vLUT cached per query for massive speedup on repeated use</li>
-</ol>
-<hr>
-</section>
-</section>
-<section id="files-created" class="level2">
-<h2 class="anchored" data-anchor-id="files-created">Files Created</h2>
-<table class="caption-top table">
-<colgroup>
-<col style="width: 27%">
-<col style="width: 40%">
-<col style="width: 31%">
-</colgroup>
-<thead>
-<tr class="header">
-<th>File</th>
-<th>Purpose</th>
-<th>Lines</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td><code>test_quantized_vectors.py</code></td>
-<td>Test encoder/decoder with simulated data</td>
-<td>258</td>
-</tr>
-<tr class="even">
-<td><code>test_one_sided_vlut.py</code></td>
-<td>Test one-sided vLUT functionality</td>
-<td>338</td>
-</tr>
-<tr class="odd">
-<td><code>examples/one_sided_vlut_search.py</code></td>
-<td>Practical vector search examples</td>
-<td>476</td>
-</tr>
-<tr class="even">
-<td><code>examples/README.md</code></td>
-<td>Documentation for examples</td>
-<td>171</td>
-</tr>
-<tr class="odd">
-<td><code>TESTING_SUMMARY.md</code></td>
-<td>This file</td>
-<td>-</td>
-</tr>
-</tbody>
-</table>
-<hr>
-</section>
-<section id="impact-and-contributions" class="level2">
-<h2 class="anchored" data-anchor-id="impact-and-contributions">Impact and Contributions</h2>
-<section id="core-library-fixes" class="level3">
-<h3 class="anchored" data-anchor-id="core-library-fixes">Core Library Fixes</h3>
-<ol type="1">
-<li><strong>Fixed <code>vLUTManager.build_one_sided_vlut()</code></strong> in <code>coset/quant/vlut.py</code>
-<ul>
-<li>Now stores residuals instead of raw lattice points</li>
-<li>Matches HNLQ hierarchical quantization formula</li>
-</ul></li>
-<li><strong>Fixed <code>_decode_encodings_to_lattice_points()</code></strong> in <code>coset/quant/vlut.py</code>
-<ul>
-<li>Corrected matrix multiplication to use <code>G.T</code></li>
-<li>Ensures consistency with <code>decode_coords</code></li>
-</ul></li>
-</ol>
-</section>
-<section id="test-coverage" class="level3">
-<h3 class="anchored" data-anchor-id="test-coverage">Test Coverage</h3>
-<ul>
-<li>✅ Zero reconstruction error validation</li>
-<li>✅ Encoder/decoder correctness</li>
-<li>✅ One-sided vLUT accuracy</li>
-<li>✅ Performance benchmarking</li>
-<li>✅ Multiple lattice types (Z2, D4, E8)</li>
-<li>✅ Various quantization parameters</li>
-</ul>
-</section>
-<section id="practical-examples" class="level3">
-<h3 class="anchored" data-anchor-id="practical-examples">Practical Examples</h3>
-<ul>
-<li>✅ Semantic search with quantized embeddings</li>
-<li>✅ Batch query processing</li>
-<li>✅ k-NN retrieval</li>
-<li>✅ Performance comparisons</li>
-<li>✅ Real-world use case demonstrations</li>
-</ul>
-<hr>
-</section>
-</section>
-<section id="key-takeaways" class="level2">
-<h2 class="anchored" data-anchor-id="key-takeaways">Key Takeaways</h2>
-<ol type="1">
-<li><strong>One-sided vLUT enables efficient vector search</strong> without decoding quantized data</li>
-<li><strong>Perfect accuracy</strong> maintained with residual-based vLUT implementation</li>
-<li><strong>1000x+ speedup</strong> from query-specific vLUT caching for repeated queries</li>
-<li><strong>3-4x speedup</strong> vs traditional decode-then-compute approach</li>
-<li><strong>Ideal for</strong>:
-<ul>
-<li>Semantic search engines</li>
-<li>Vector databases (FAISS, Qdrant integration)</li>
-<li>Recommendation systems</li>
-<li>Large-scale similarity retrieval</li>
-<li>Any application with quantized embeddings</li>
-</ul></li>
-</ol>
-<hr>
-</section>
-<section id="future-work" class="level2">
-<h2 class="anchored" data-anchor-id="future-work">Future Work</h2>
-<p>Potential extensions: - Two-sided vLUT testing and examples - Integration with popular vector database systems - Transformer attention with quantized weights - Multi-query batch optimization - Approximate nearest neighbor (ANN) with vLUT</p>
-<hr>
-</section>
-<section id="citation" class="level2">
-<h2 class="anchored" data-anchor-id="citation">Citation</h2>
-<p>If you use COSET or these examples in your research, please cite:</p>
-<div class="sourceCode" id="cb5"><pre class="sourceCode bibtex code-with-copy"><code class="sourceCode bibtex"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="va">@article</span>{<span class="ot">kaplan2025coset</span>,</span>
-<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">title</span>={COSET: Coding-based Quantization for Efficient Transformers},</span>
-<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">author</span>={Kaplan, Haim and Ordentlich, Erik},</span>
-<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">journal</span>={arXiv preprint},</span>
-<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">year</span>={2025}</span>
-<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<hr>
-<p><strong>Last Updated</strong>: 2025-09-30<br>
-<strong>Status</strong>: All tests passing ✅<br>
-<strong>Accuracy</strong>: Perfect (&lt; 1e-6 error) ✅<br>
-<strong>Performance</strong>: 1000x+ caching speedup ✅</p>
+<section id="running-tests" class="level2">
+<h2 class="anchored" data-anchor-id="running-tests">Running Tests</h2>
+<div class="sourceCode" id="cb1"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pytest</span> tests/ <span class="at">-v</span> <span class="at">-m</span> <span class="st">"not slow"</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>See <a href="../tests/README.md">tests/README.md</a> for full documentation.</p>
 
 
 </section>
