@@ -9,6 +9,12 @@ project:
     - test-summaries/README.md
     - test-summaries/*.md
 
+format:
+  html:
+    # Theme: cosmo | flatly | litera | lumen | lux | minty | pulse | sandstone | united | yeti | zephyr | darkly | solar | slate | ...
+    theme: cosmo
+    fontsize: 0.9em
+
 website:
   title: "Coset"
   page-navigation: true
