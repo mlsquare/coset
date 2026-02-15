@@ -1,5 +1,54 @@
 [
   {
+    "objectID": "test-summaries/TESTING_SUMMARY.html",
+    "href": "test-summaries/TESTING_SUMMARY.html",
+    "title": "COSET Testing Summary",
+    "section": "",
+    "text": "Overview of testing for the COSET library.\n\n\nThe test suite covers quantization operations and the supported API. The main supported API focuses on QAT layers (create_e8_hnlq_linear, HNLQLinear) for quantization-aware training.\n\n\n\n\n\nValidates encoder/decoder with simulated quantized data.\n\n\n\nLattice\nq\nM\nZero Error Rate\n\n\n\n\nZ2\n3\n2\n100%\n\n\nD4\n3\n2\n100%\n\n\nE8\n3\n2\n95%\n\n\nD4\n4\n2\n100%\n\n\nE8\n4\n3\n100%\n\n\n\n\n\n\nLegacy tests in tests/legacy/ cover deprecated modules (lattices, quant, nn) for backward compatibility. These are not part of the current supported API.\n\n\n\n\npytest tests/ -v -m \"not slow\"\nSee tests/README.md for full documentation."
+  },
+  {
+    "objectID": "test-summaries/TESTING_SUMMARY.html#overview",
+    "href": "test-summaries/TESTING_SUMMARY.html#overview",
+    "title": "COSET Testing Summary",
+    "section": "",
+    "text": "The test suite covers quantization operations and the supported API. The main supported API focuses on QAT layers (create_e8_hnlq_linear, HNLQLinear) for quantization-aware training."
+  },
+  {
+    "objectID": "test-summaries/TESTING_SUMMARY.html#test-suites",
+    "href": "test-summaries/TESTING_SUMMARY.html#test-suites",
+    "title": "COSET Testing Summary",
+    "section": "",
+    "text": "Validates encoder/decoder with simulated quantized data.\n\n\n\nLattice\nq\nM\nZero Error Rate\n\n\n\n\nZ2\n3\n2\n100%\n\n\nD4\n3\n2\n100%\n\n\nE8\n3\n2\n95%\n\n\nD4\n4\n2\n100%\n\n\nE8\n4\n3\n100%\n\n\n\n\n\n\nLegacy tests in tests/legacy/ cover deprecated modules (lattices, quant, nn) for backward compatibility. These are not part of the current supported API."
+  },
+  {
+    "objectID": "test-summaries/TESTING_SUMMARY.html#running-tests",
+    "href": "test-summaries/TESTING_SUMMARY.html#running-tests",
+    "title": "COSET Testing Summary",
+    "section": "",
+    "text": "pytest tests/ -v -m \"not slow\"\nSee tests/README.md for full documentation."
+  },
+  {
+    "objectID": "test-summaries/INDEX.html",
+    "href": "test-summaries/INDEX.html",
+    "title": "Test Documentation Index",
+    "section": "",
+    "text": "Quick reference for test documentation.\n\n\n\nREADME - Main test documentation\nTESTING_SUMMARY - Testing overview\nPYTEST_CONVERSION_SUMMARY - Pytest structure\n\n\n\n\npytest tests/ -v -m \"not slow\"\nSee tests/README.md for complete usage."
+  },
+  {
+    "objectID": "test-summaries/INDEX.html#documents",
+    "href": "test-summaries/INDEX.html#documents",
+    "title": "Test Documentation Index",
+    "section": "",
+    "text": "README - Main test documentation\nTESTING_SUMMARY - Testing overview\nPYTEST_CONVERSION_SUMMARY - Pytest structure"
+  },
+  {
+    "objectID": "test-summaries/INDEX.html#running-tests",
+    "href": "test-summaries/INDEX.html#running-tests",
+    "title": "Test Documentation Index",
+    "section": "",
+    "text": "pytest tests/ -v -m \"not slow\"\nSee tests/README.md for complete usage."
+  },
+  {
     "objectID": "paper.html",
     "href": "paper.html",
     "title": "Publication",
@@ -77,111 +126,6 @@
     "text": "python examples/bert_binary_classifier_e8.py\npython examples/bert_multiclass_classifier_e8.py\npython examples/qat_cold_start_comparison.py"
   },
   {
-    "objectID": "test-summaries/PYTEST_CONVERSION_SUMMARY.html",
-    "href": "test-summaries/PYTEST_CONVERSION_SUMMARY.html",
-    "title": "Pytest Conversion Summary",
-    "section": "",
-    "text": "Pytest-based test structure for COSET.\n\n\n\ntests/legacy/test_quantized_vectors_pytest.py - Quantized vector operations\ntests/legacy/test_lattices.py - Lattice tests\ntests/legacy/test_nn.py - Neural network layer tests\ntests/legacy/test_quant.py - Quantization function tests\n\n\n\n\n# All tests (skip slow)\npytest tests/ -v -m \"not slow\"\n\n# With coverage\npytest tests/ --cov=coset --cov-report=html\n\n\n\n\n@pytest.mark.slow - Performance benchmarks\n@pytest.mark.integration - Integration tests\n\nSee tests/README.md for full documentation."
-  },
-  {
-    "objectID": "test-summaries/PYTEST_CONVERSION_SUMMARY.html#test-files",
-    "href": "test-summaries/PYTEST_CONVERSION_SUMMARY.html#test-files",
-    "title": "Pytest Conversion Summary",
-    "section": "",
-    "text": "tests/legacy/test_quantized_vectors_pytest.py - Quantized vector operations\ntests/legacy/test_lattices.py - Lattice tests\ntests/legacy/test_nn.py - Neural network layer tests\ntests/legacy/test_quant.py - Quantization function tests"
-  },
-  {
-    "objectID": "test-summaries/PYTEST_CONVERSION_SUMMARY.html#running-tests",
-    "href": "test-summaries/PYTEST_CONVERSION_SUMMARY.html#running-tests",
-    "title": "Pytest Conversion Summary",
-    "section": "",
-    "text": "# All tests (skip slow)\npytest tests/ -v -m \"not slow\"\n\n# With coverage\npytest tests/ --cov=coset --cov-report=html"
-  },
-  {
-    "objectID": "test-summaries/PYTEST_CONVERSION_SUMMARY.html#markers",
-    "href": "test-summaries/PYTEST_CONVERSION_SUMMARY.html#markers",
-    "title": "Pytest Conversion Summary",
-    "section": "",
-    "text": "@pytest.mark.slow - Performance benchmarks\n@pytest.mark.integration - Integration tests\n\nSee tests/README.md for full documentation."
-  },
-  {
-    "objectID": "test-summaries/README.html",
-    "href": "test-summaries/README.html",
-    "title": "Test Documentation Archive",
-    "section": "",
-    "text": "Documentation for the COSET test suite.\n\n\n\n\n\nTESTING_SUMMARY - Testing overview\nPYTEST_CONVERSION_SUMMARY - Pytest structure\n\n\n\n\n\n\n\ntests/\n└── legacy/\n    ├── test_lattices.py\n    ├── test_nn.py\n    ├── test_quant.py\n    └── test_quantized_vectors_pytest.py\n\n\n\npytest tests/ -v -m \"not slow\"\n\n\n\n# Quantized vectors only\npytest tests/legacy/test_quantized_vectors_pytest.py -v\n\n# Performance benchmarks\npytest tests/ -v -m \"slow\"\nSee tests/README.md for complete usage.\n\n\n\n\nThe supported API focuses on: - QAT Layers - create_e8_hnlq_linear, HNLQLinear - E8 and D4 lattice quantization - Quantized vectors - Encoding/decoding validation\nLegacy tests cover deprecated modules for backward compatibility."
-  },
-  {
-    "objectID": "test-summaries/README.html#contents",
-    "href": "test-summaries/README.html#contents",
-    "title": "Test Documentation Archive",
-    "section": "",
-    "text": "TESTING_SUMMARY - Testing overview\nPYTEST_CONVERSION_SUMMARY - Pytest structure"
-  },
-  {
-    "objectID": "test-summaries/README.html#quick-reference",
-    "href": "test-summaries/README.html#quick-reference",
-    "title": "Test Documentation Archive",
-    "section": "",
-    "text": "tests/\n└── legacy/\n    ├── test_lattices.py\n    ├── test_nn.py\n    ├── test_quant.py\n    └── test_quantized_vectors_pytest.py\n\n\n\npytest tests/ -v -m \"not slow\"\n\n\n\n# Quantized vectors only\npytest tests/legacy/test_quantized_vectors_pytest.py -v\n\n# Performance benchmarks\npytest tests/ -v -m \"slow\"\nSee tests/README.md for complete usage."
-  },
-  {
-    "objectID": "test-summaries/README.html#current-focus",
-    "href": "test-summaries/README.html#current-focus",
-    "title": "Test Documentation Archive",
-    "section": "",
-    "text": "The supported API focuses on: - QAT Layers - create_e8_hnlq_linear, HNLQLinear - E8 and D4 lattice quantization - Quantized vectors - Encoding/decoding validation\nLegacy tests cover deprecated modules for backward compatibility."
-  },
-  {
-    "objectID": "test-summaries/INDEX.html",
-    "href": "test-summaries/INDEX.html",
-    "title": "Test Documentation Index",
-    "section": "",
-    "text": "Quick reference for test documentation.\n\n\n\nREADME - Main test documentation\nTESTING_SUMMARY - Testing overview\nPYTEST_CONVERSION_SUMMARY - Pytest structure\n\n\n\n\npytest tests/ -v -m \"not slow\"\nSee tests/README.md for complete usage."
-  },
-  {
-    "objectID": "test-summaries/INDEX.html#documents",
-    "href": "test-summaries/INDEX.html#documents",
-    "title": "Test Documentation Index",
-    "section": "",
-    "text": "README - Main test documentation\nTESTING_SUMMARY - Testing overview\nPYTEST_CONVERSION_SUMMARY - Pytest structure"
-  },
-  {
-    "objectID": "test-summaries/INDEX.html#running-tests",
-    "href": "test-summaries/INDEX.html#running-tests",
-    "title": "Test Documentation Index",
-    "section": "",
-    "text": "pytest tests/ -v -m \"not slow\"\nSee tests/README.md for complete usage."
-  },
-  {
-    "objectID": "test-summaries/TESTING_SUMMARY.html",
-    "href": "test-summaries/TESTING_SUMMARY.html",
-    "title": "COSET Testing Summary",
-    "section": "",
-    "text": "Overview of testing for the COSET library.\n\n\nThe test suite covers quantization operations and the supported API. The main supported API focuses on QAT layers (create_e8_hnlq_linear, HNLQLinear) for quantization-aware training.\n\n\n\n\n\nValidates encoder/decoder with simulated quantized data.\n\n\n\nLattice\nq\nM\nZero Error Rate\n\n\n\n\nZ2\n3\n2\n100%\n\n\nD4\n3\n2\n100%\n\n\nE8\n3\n2\n95%\n\n\nD4\n4\n2\n100%\n\n\nE8\n4\n3\n100%\n\n\n\n\n\n\nLegacy tests in tests/legacy/ cover deprecated modules (lattices, quant, nn) for backward compatibility. These are not part of the current supported API.\n\n\n\n\npytest tests/ -v -m \"not slow\"\nSee tests/README.md for full documentation."
-  },
-  {
-    "objectID": "test-summaries/TESTING_SUMMARY.html#overview",
-    "href": "test-summaries/TESTING_SUMMARY.html#overview",
-    "title": "COSET Testing Summary",
-    "section": "",
-    "text": "The test suite covers quantization operations and the supported API. The main supported API focuses on QAT layers (create_e8_hnlq_linear, HNLQLinear) for quantization-aware training."
-  },
-  {
-    "objectID": "test-summaries/TESTING_SUMMARY.html#test-suites",
-    "href": "test-summaries/TESTING_SUMMARY.html#test-suites",
-    "title": "COSET Testing Summary",
-    "section": "",
-    "text": "Validates encoder/decoder with simulated quantized data.\n\n\n\nLattice\nq\nM\nZero Error Rate\n\n\n\n\nZ2\n3\n2\n100%\n\n\nD4\n3\n2\n100%\n\n\nE8\n3\n2\n95%\n\n\nD4\n4\n2\n100%\n\n\nE8\n4\n3\n100%\n\n\n\n\n\n\nLegacy tests in tests/legacy/ cover deprecated modules (lattices, quant, nn) for backward compatibility. These are not part of the current supported API."
-  },
-  {
-    "objectID": "test-summaries/TESTING_SUMMARY.html#running-tests",
-    "href": "test-summaries/TESTING_SUMMARY.html#running-tests",
-    "title": "COSET Testing Summary",
-    "section": "",
-    "text": "pytest tests/ -v -m \"not slow\"\nSee tests/README.md for full documentation."
-  },
-  {
     "objectID": "project.html",
     "href": "project.html",
     "title": "Documentation",
@@ -250,5 +194,61 @@
     "title": "Documentation",
     "section": "",
     "text": "pytest tests/\nblack coset examples\nruff check coset examples"
+  },
+  {
+    "objectID": "test-summaries/README.html",
+    "href": "test-summaries/README.html",
+    "title": "Test Documentation Archive",
+    "section": "",
+    "text": "Documentation for the COSET test suite.\n\n\n\n\n\nTESTING_SUMMARY - Testing overview\nPYTEST_CONVERSION_SUMMARY - Pytest structure\n\n\n\n\n\n\n\ntests/\n└── legacy/\n    ├── test_lattices.py\n    ├── test_nn.py\n    ├── test_quant.py\n    └── test_quantized_vectors_pytest.py\n\n\n\npytest tests/ -v -m \"not slow\"\n\n\n\n# Quantized vectors only\npytest tests/legacy/test_quantized_vectors_pytest.py -v\n\n# Performance benchmarks\npytest tests/ -v -m \"slow\"\nSee tests/README.md for complete usage.\n\n\n\n\nThe supported API focuses on: - QAT Layers - create_e8_hnlq_linear, HNLQLinear - E8 and D4 lattice quantization - Quantized vectors - Encoding/decoding validation\nLegacy tests cover deprecated modules for backward compatibility."
+  },
+  {
+    "objectID": "test-summaries/README.html#contents",
+    "href": "test-summaries/README.html#contents",
+    "title": "Test Documentation Archive",
+    "section": "",
+    "text": "TESTING_SUMMARY - Testing overview\nPYTEST_CONVERSION_SUMMARY - Pytest structure"
+  },
+  {
+    "objectID": "test-summaries/README.html#quick-reference",
+    "href": "test-summaries/README.html#quick-reference",
+    "title": "Test Documentation Archive",
+    "section": "",
+    "text": "tests/\n└── legacy/\n    ├── test_lattices.py\n    ├── test_nn.py\n    ├── test_quant.py\n    └── test_quantized_vectors_pytest.py\n\n\n\npytest tests/ -v -m \"not slow\"\n\n\n\n# Quantized vectors only\npytest tests/legacy/test_quantized_vectors_pytest.py -v\n\n# Performance benchmarks\npytest tests/ -v -m \"slow\"\nSee tests/README.md for complete usage."
+  },
+  {
+    "objectID": "test-summaries/README.html#current-focus",
+    "href": "test-summaries/README.html#current-focus",
+    "title": "Test Documentation Archive",
+    "section": "",
+    "text": "The supported API focuses on: - QAT Layers - create_e8_hnlq_linear, HNLQLinear - E8 and D4 lattice quantization - Quantized vectors - Encoding/decoding validation\nLegacy tests cover deprecated modules for backward compatibility."
+  },
+  {
+    "objectID": "test-summaries/PYTEST_CONVERSION_SUMMARY.html",
+    "href": "test-summaries/PYTEST_CONVERSION_SUMMARY.html",
+    "title": "Pytest Conversion Summary",
+    "section": "",
+    "text": "Pytest-based test structure for COSET.\n\n\n\ntests/legacy/test_quantized_vectors_pytest.py - Quantized vector operations\ntests/legacy/test_lattices.py - Lattice tests\ntests/legacy/test_nn.py - Neural network layer tests\ntests/legacy/test_quant.py - Quantization function tests\n\n\n\n\n# All tests (skip slow)\npytest tests/ -v -m \"not slow\"\n\n# With coverage\npytest tests/ --cov=coset --cov-report=html\n\n\n\n\n@pytest.mark.slow - Performance benchmarks\n@pytest.mark.integration - Integration tests\n\nSee tests/README.md for full documentation."
+  },
+  {
+    "objectID": "test-summaries/PYTEST_CONVERSION_SUMMARY.html#test-files",
+    "href": "test-summaries/PYTEST_CONVERSION_SUMMARY.html#test-files",
+    "title": "Pytest Conversion Summary",
+    "section": "",
+    "text": "tests/legacy/test_quantized_vectors_pytest.py - Quantized vector operations\ntests/legacy/test_lattices.py - Lattice tests\ntests/legacy/test_nn.py - Neural network layer tests\ntests/legacy/test_quant.py - Quantization function tests"
+  },
+  {
+    "objectID": "test-summaries/PYTEST_CONVERSION_SUMMARY.html#running-tests",
+    "href": "test-summaries/PYTEST_CONVERSION_SUMMARY.html#running-tests",
+    "title": "Pytest Conversion Summary",
+    "section": "",
+    "text": "# All tests (skip slow)\npytest tests/ -v -m \"not slow\"\n\n# With coverage\npytest tests/ --cov=coset --cov-report=html"
+  },
+  {
+    "objectID": "test-summaries/PYTEST_CONVERSION_SUMMARY.html#markers",
+    "href": "test-summaries/PYTEST_CONVERSION_SUMMARY.html#markers",
+    "title": "Pytest Conversion Summary",
+    "section": "",
+    "text": "@pytest.mark.slow - Performance benchmarks\n@pytest.mark.integration - Integration tests\n\nSee tests/README.md for full documentation."
   }
 ]
