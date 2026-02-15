@@ -1,0 +1,1796 @@
+\documentclass{article}
+
+%%% ready for submission %%%
+%\usepackage{cpal_2025}
+\usepackage[final]{cpal_2025}
+\usepackage{algorithm} 
+\usepackage{algorithmic}  
+\usepackage[algo2e]{algorithm2e}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{enumitem}
+ \usepackage{graphicx}
+ \usepackage{amsthm}
+\usepackage{multirow}
+\usepackage[table]{xcolor}
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}{Lemma}
+\newtheorem{proposition}{Proposition}
+\newtheorem{corollary}{Corollary}
+\usepackage{xcolor}
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}
+
+\theoremstyle{remark}
+\newtheorem{remark}{Remark}
+
+%%% to compile a preprint version, e.g., for submission to arXiv, add the [preprint] option %%%
+%\usepackage[preprint]{cpal_2025}
+
+%%% to compile a camera-ready version, add the [final] option %%%
+%\usepackage[final]{cpal_2025}
+
+
+%add packages
+\usepackage{url}
+
+\title{Lattice-Based Vector Quantization for Low-Bit Quantization-Aware Training}
+
+
+\author{%
+  Rishika Kohli\textsuperscript{1}, 
+  Soma S. Dhavala\textsuperscript{1},
+  Shaifu Gupta\textsuperscript{1}, 
+  Manoj Singh Gaur\textsuperscript{1}
+  \\
+  \textsuperscript{1}Indian Institute of Technology, Jammu. %\textsuperscript{2}Google Research\\
+  %\texttt{zhu.3440@osu.edu, cyou@google.com}
+}
+
+\begin{document}
+
+
+\maketitle
+
+\begin{abstract}
+Quantization is an effective approach for deploying deep learning models on resource-constrained hardware, but maintaining accuracy and training stability at extreme low precision remains a major challenge. In this work, we study lattice-based vector quantization (VQ) as a practical alternative to scalar quantization for low-bit quantization-aware training (QAT). We develop a unified quantization pipeline that integrates structured lattice projections into both QAT and post-training quantization (PTQ), supporting multiple lattice choices—including E8 and D4—via a fused projection operator with straight-through estimation.
+
+Through extensive experiments across a wide range of bit-widths, lattice parameterizations, and training regimes, we show that lattice-based VQ consistently enables stable training and meaningful accuracy below 2 bits, where scalar quantization and existing PTQ methods typically underperform or are unavailable. In this low-bit regime, exploiting geometric structure across weight blocks improves robustness by reducing overload and stabilizing optimization, while at moderate and higher bit-widths, performance differences narrow and simpler quantization schemes become sufficient. We further analyze the role of lattice choice, dynamic-range scaling, and overload behavior, and demonstrate that explicit overload control is central to reliable low-bit performance. Finally, we show that lattice-based QAT extends beyond binary classification and weight-only quantization, supporting multi-class tasks, joint weight–activation quantization, and transformer encoders such as BERT, achieving substantial compression with controlled accuracy degradation.
+\end{abstract}
+
+\section{Introduction}
+Accommodating deep learning (DL) models on edge devices is often challenging due to the high computational requirements \cite{nguyen2024bold}. To address the gap between current DL models and the requirement of edge deployment, researchers have explored three broad directions \cite{diao2024attention}: pruning the model, designing lightweight architectures, and employing model quantization. Together, these approaches form the foundation of current strategies for enabling efficient DL on edge devices. In this work, we explore this third direction of model quantization. Model quantization maps high-precision floating-point weights and activations to lower-precision fixed or floating-point representations, offering substantial memory and compute savings. 
+
+Recent work highlights that model quantization for low-bit inference can substantially alleviate memory bottlenecks, particularly when combined with fast lookup-table–based computation \cite{hnlq}. This is crucial for edge hardware, where on-chip storage and bandwidth are severely constrained. The field has recently seen a push towards 1-bit \cite{wang2023bitnet} quantization, where linear layers are aggressively quantized but can still maintain competitive accuracy. These advances further motivate the exploration of low-bit scalar and vector quantization schemes, as pursued in this work.
+
+\noindent \textbf{Our Contributions.} A major portion of inference cost in DL models arises from matrix–matrix or matrix–vector multiplications of the form $WX$, where $W$ denotes the model's weight matrix and $X$ is the input activation. Quantizing the weights (and activations) applies a mapping $Q: \mathbb{R} \rightarrow \mathcal{Q}_b$ where $\mathcal{Q}_b$ denotes the set of fixed/floating-point values representable using $b$-bit precision. For example, common $b$-bit formats include integer types such as \texttt{int8}/\texttt{qint8} and low-bit floating-point types such as 
+\texttt{float16} and \texttt{bfloat16}, as implemented in PyTorch\footnote{https://docs.pytorch.org/docs/stable/tensor\_attributes.html}. In this work, two popular model quantization paradigms: \textit{quantization-aware training} (QAT: training-time quantization) and \textit{post-training quantization} (PTQ:  forward-only quantization), are explored. We develop a unified quantization framework that examines both these paradigms for low-bit deployments and can work for multiple lattice types. Within the QAT setting, we study two families of quantizers. In \textit{scalar quantization} (SQ), each weight is treated independently and works well when the data is uniformly spread along each coordinate. Whereas, in \textit{vector quantization} (VQ), small blocks of weights (such as 8-D vectors) are quantized jointly and are more effective when the data has a non-uniform distribution, allowing it to use bits more efficiently and achieve better rate–distortion performance. In this work, we use structured lattices for VQ. Beyond proposing the quantization pipeline, our study systematically examines several practical questions that arise when pushing bit-widths to extreme limits. 
+\vspace{-0.40cm}
+\begin{itemize}
+    \item Can QAT reliably perform better than PTQ in the low-bit regime? (\textit{Section 4.1})
+    
+    % \item Is the additional computational overhead of QAT manageable in practice? (\textit{Section 4.2} and \textit{Appendix A.3.3.})
+    
+    \item Does lattice parameterization affect quantized model performance? (\textit{Section 4.2})
+    
+    \item Can lattice-based VQ be integrated into transformer encoders such as BERT while preserving downstream task performance? (\textit{Section 4.3})
+    
+    \item Can QAT be introduced without any initial FP32 warm-up phase? (\textit{Appendix})
+    
+    \item Does reducing overload (residual error between the original and quantized weights exceeding the bit budget) lead to stable performance and mitigate degradation at low precision? (\textit{Appendix})
+    
+    \item Does the proposed framework generalize to other lattice families beyond E8 (e.g., lower-dimensional lattices)? (\textit{Appendix})
+    
+    \item Can joint quantization of weights and activations be performed within the proposed framework while maintaining stability at low precision? (\textit{Appendix})
+    
+    \item Does lattice-based QAT extend beyond binary classification to more general task settings such as multi-class classification? (\textit{Appendix})
+    
+\end{itemize}
+
+% how warm-up schedules affect stability during low-bit training, and what additional computational overhead QAT introduces. For VQ, we analyze the roles of its design parameters, such as the choice of quantization radix $q$ and the number of hierarchical digits $M$. We also examine how overload in vector quantization influences accuracy and how these effects diminish as overload reduces. Finally, motivated by recent progress in compressing large language models (e.g., BinaryBERT \cite{bai2021binarybert} and BitNet \cite{wang2023bitnet}), we also evaluate lattice-based quantization on BERT, examining both PTQ and QAT settings across multiple bit configurations.
+
+To affirmatively answer these questions in our study, we conduct extensive experiments across multiple datasets and architectures. \textit{Note:} For clarity, quantization precision is classified here as low-bit precision ($<$ 4 bits), mid-bit precision (4–12 bits), and high-bit precision ($>12$ bits). Our code will be made available on GitHub.
+
+\section{Related Work}
+In this work, we examine model quantization in both QAT and PTQ modes.
+
+\textbf{QAT} incorporates quantization into the training process via straight-through estimation, allowing the model to adapt to the noise introduced by low-bit computation, but requires access to both the model parameters and the training data.
+DoReFa-Net \cite{dorfa} showed that models with low-bit weights and activations can be trained using deterministic quantization, while gradients require stochastic quantization. \cite{jacob} introduces a practical QAT approach that simulates 8-bit quantization during training using affine (scale + zero-point) quantization, enabling accurate integer-only inference on edge hardware.
+
+PACT \cite{pact} proposes a learnable activation-clipping mechanism where the clipping parameter is optimized during training to reduce quantization error, enabling stable low-bit activations and near–full-precision accuracy in CNNs. LSQ \cite{lsq} improves training-time quantization by learning the quantizer step size directly from task loss, achieving strong results for 2–4 bits weights and activations. LSQ+ \cite{lsq+} extends this framework with learnable offsets and a more robust initialization scheme, enabling effective asymmetric activation quantization and better stability for architectures with non-ReLU activations. SAT \cite{sat} further examines the instability of low-bit training and introduces scale-adjusted updates alongside calibrated activation-clipping gradients, resulting in more stable optimization and competitive accuracy in the quantized mode.
+
+Brevitas \cite{brevitas} is a QAT framework that implements scalar uniform quantization using STE-based scale learning. It provides a strong and widely adopted baseline for quantization methods. To the best of our knowledge, all existing QAT methods operate purely in the scalar domain, and VQ has not been explored in QAT settings, largely due to the computational overhead with codebook construction and finding the nearest codebook - referred to as Closest Vector Problem (CVP) in the lattice literature.
+
+On the other hand, \textbf{PTQ} aims to quantize a trained DL model into a low-precision version without performing any retraining. It requires only the pretrained weights and, optionally, a small unlabeled calibration dataset to estimate activation ranges. Early PTQ methods mainly used simple techniques such as rounding weights to the nearest quantization level, adjusting clipping ranges \cite{banner2019post, choukroun2019low}, or applying bias correction \cite{nagel2019data}. However, these heuristic approaches often suffer from large accuracy drops, especially at 4-bit precision, because they do not consider how weight perturbations affect the model’s output or task loss. To mitigate this, \cite{nagel2020up} introduced a data-driven rounding strategy that learns whether each weight should round up or down, using a layer-wise reconstruction loss to match the FP32 layer output. Building on this,  BRECQ \cite{li2021brecq} showed that block-wise reconstruction optimizing quantization over blocks of consecutive layers rather than each layer independently, further stabilizes error propagation and yields better accuracy. 
+
+More recently, QuIP \cite{quip} shows that preprocessing weights using structured orthogonal transforms improves incoherence, making weights easier to quantize and significantly reducing PTQ error. Building on this, QuIP\#\cite{quip2} extends this idea with a faster Hadamard-based transform, E8-lattice VQ, and a lightweight fine-tuning stage, achieving good 2–3 bit PTQ performance. Extending this, CALDERA \cite{saha2024compressing} builds on QuIP\# by exploiting the approximate low-rank structure of LLM weight matrices to enhance quantization quality. 
+
+Existing QAT methods are exclusively scalar because learning multidimensional codebooks and performing lattice projections impose substantial computational and implementation burdens during training. Even though QuIP\# demonstrates the benefits of structured orthogonal transforms and E8-lattice VQ, these techniques have not been extended to the QAT setting, nor have they been explored within a hierarchical (multi-digit) lattice decomposition. In particular, QAT for LLMs is relatively underexplored \cite{quip}. As a result, the field lacks a unified framework that enables the use of lattice-based hierarchical VQ in QAT. Addressing these gaps is essential for understanding whether the advantages of lattice-based quantization in PTQ can translate to the QAT setup.
+
+\section{Methodology}
+In this section, we organize the quantization work into two complementary approaches: vector and scalar quantization.
+
+\subsection{Vector quantization}
+VQ originates from classical information-theoretic insights that coding vectors rather than scalars achieves strictly better rate distortion performance \cite{gray1984vector}. It maps multi-dimensional vectors to a finite set of codewords rather than quantizing each element independently, where each codeword represents a representative vector in the quantized space. Given a codebook $\mathcal{C} = \{C[i]\}$, the quantizer assigns an input vector $x$ to the nearest codeword $
+Q(x) = \arg\min_{i} \| x - C[i] \|_2$. Classical VQ methods typically learn the codebook from data, whereas lattice-based VQ employs pre-determined, structured codebooks defined by the underlying lattice geometry. In this work, we focus on lattice-based VQ, so we briefly introduce some lattice definitions.
+
+\subsubsection{Preliminaries}
+A lattice $L \subset \mathbb{R}^n$ is a discrete additive subgroup generated by integer linear combinations of linearly independent basis vectors. Formally,
+$L = \left\{ \sum_{i=1}^{n} z_i b_i \;\middle|\; z_i \in \mathbb{Z} \right\}$,
+where $b_1, b_2, \ldots, b_n$ are linearly independent vectors that form a basis of the lattice. $L$ is closed under vector addition and reflection \cite{zamir2014lattice}, and its points are uniformly distributed in $\mathbb{R}^n$ according to the chosen basis. A lattice can also be represented compactly using a generator matrix $G \in \mathbb{R}^{n \times n}$ whose columns are the basis vectors, such that $L = \{ G z \mid z \in \mathbb{Z}^n \}$.
+
+
+For a point $x \in \mathbb{R}^n$, the nearest-neighbor lattice quantizer $Q_L(x)$ maps $x$ to its closest lattice point (Algorithm~3 in \cite{conway2003fast}),
+$Q_L(x) = \arg\min_{v \in L}| x - v|$. Each lattice point $v \in L$ acts as a \emph{codeword} in the quantization scheme, and the quantized representation of $x$ is given by the selected codeword.
+
+The Voronoi region $\mathcal{V}_L$ of a lattice is defined as the set of points in $\mathbb{R}^n$ that are closer to the origin than to any other lattice point,
+$\mathcal{V}_L = \left\{ x \in \mathbb{R}^n : | x | \le | x - v |,\; \forall v \in L \setminus \{0\} \right\}$. Each lattice point has a corresponding Voronoi cell obtained by translating $\mathcal{V}_L$ to that point. These Voronoi cells tile the space without overlap and form the fundamental domain for nearest-neighbor quantization.
+
+Two geometric quantities play an important role in quantization: the \emph{packing radius}, defined as the radius of the largest sphere that fits inside a Voronoi cell, and the \emph{covering radius}, defined as the radius of the smallest sphere that completely covers the Voronoi cell \cite{conway2013sphere}. Lattices with large packing radius and small covering radius generally yield better quantization performance.
+
+Several classes of lattices are commonly used in quantization, including the integer lattice $\mathbb{Z}^n$, the $D_n$ lattice (integer vectors with even coordinate sum), and the highly symmetric $E_n$ lattices. The \textbf{$E_8$ lattice} (also used in QuIP\#, but in a PTQ setting) is an even, unimodular lattice in $\mathbb{R}^8$, whose points are given by 
+$E_8 = \bigl\{ x \in \mathbb{Z}^8 \cup (\mathbb{Z}^8 + \tfrac{1}{2}\mathbf{1}) :
+\sum_{i=1}^8 x_i \equiv 0 \; (\mathrm{mod}\;2) \bigr\}$ \cite{conway2013sphere}.
+Its Voronoi cell has the smallest known covering radius among all 8-D lattices, making $E_8$ particularly well suited for VQ, where inputs are projected to their nearest lattice point (codeword).
+
+
+\subsubsection{Prior works on Lattice quantization}
+Mukherjee et al. \cite{mukherjee2002successive} introduced successive refinement in lattice VQ, where vectors are quantized through a hierarchy of Voronoi-shaped lattice codebooks that progressively reduce distortion at each stage. Later, Fuchs \cite{fuchs2013embedded} proposed embedded Voronoi codes to refine lattice VQ. It combines differently scaled Voronoi codebooks to yield a 1-bit-per-dimension progressive bitstream while retaining the structural advantages of lattice quantization.
+
+Hierarchical Nested Lattice Quantization (HNLQ) \cite{hnlq} extends classical nested-lattice VQ by decomposing a fine-lattice projection into $M$ radix-$q$ stages. Instead of quantizing $x \in \mathbb{R}^d$ directly to the nearest point in $q^M L$, HNLQ expresses it using digits $g_m(x) \in A_q = L \cap (q\mathcal{V}_L)$ such that $Q_{q^M L}(x) = \sum_{m=0}^{M-1} q^m g_m(x)$. The digits arise from recursive residual quantization, where $g_0(x)=Q_L(x)$ and $g_m(x)=q^{-m}\!\left(Q_L^{\circ m}(x)-Q_L^{\circ (m+1)}(x)\right)$, with $Q_L^{\circ m}$ denoting $m$ nested applications of the coarse-lattice quantizer. Because each $g_m$ lies in the small Voronoi codebook $A_q$, the full representation requires only $dM\log_2(q)$ bits, replacing an exponentially large codebook with $M$ compact, LUT-friendly ones. Here, we state a lemma from \cite{hnlq}.
+
+\begin{lemma}[Correctness of Hierarchical Reconstruction \cite{hnlq}]
+HNLQ reconstructs as $\hat{x}=\sum_{m=0}^{M-1} q^m g_m(x)$, and
+$\hat{x}=Q_{q^M L}(x) \quad \Longleftrightarrow \quad Q_L^{\circ M}(x)=0$
+Thus, overload occurs precisely when the $M$-fold coarse projection does not vanish.
+\end{lemma}
+
+When overload does not occur, i.e., $Q_L^{\circ M}(x)=0$, the digit recursion collapses, and each digit reduces to $g_m(x)=q^{-m} Q_L^{\circ m}(x)$, 
+since all deeper coarse-lattice projections vanish. In this regime, HNLQ effectively performs a single nearest-lattice projection onto $q^M L$, with no contribution from higher-order residuals, alleviating the need for traversing the $M$ refinement stages to get the quantized value. Moreover, since the digits are drawn from small sub-codebooks, inner products between quantized vectors can be computed using compact one-sided or two-sided LUTs of size $q^{d/M}$ and $q^{2d/M}$, respectively (compared to $q^{2d}$ for flat VQ), keeping all tables small enough for L1 cache.
+
+\subsubsection{Our approach}\label{E8approach}
+\vspace{-1cm}
+A common limitation of traditional VQ approaches is that they rely on arbitrarily learned codebooks, which lack geometric structure and are difficult to integrate uniformly across neural network layers. Our method instead incorporates a fixed, geometry-derived $E_8$ lattice into MLP and BERT linear layers via the fused HNLQ operator in Algorithm~\ref{alg:fused-e8-hnlq}, combining (i) dynamic-range normalization, (ii) blockwise $E_8$ lattice projection, and (iii) an optional STE for QAT.
+
+A key novelty of our work is extending HNLQ to a full QAT regime. Unlike traditional VQ, whose codebook is to be learnt from data, lattice VQ uses a fixed geometric codebook with strong distance properties. This enables a uniform, architecture-agnostic quantizer that operates consistently across both PTQ and QAT. However, controlling the dynamic range of the input to operate HNLQ effectively is very critical.
+
+% \noindent \textbf{Dynamic-range calibration.}
+% Given a weight matrix $W_{\mathrm{original}} \in \mathbb{R}^{O \times I}$, the procedure begins by computing a \emph{row-wise local scale} that normalizes the dynamic range of each row.
+% For row $i$, we estimate its empirical standard deviation $ \sigma_i$ and and define a normalization factor $\beta_{\mathrm{row},i} = Y_{\max}/(C_b \sigma_i)$ where $C_b$ is a row safety constant, $Y_{\max}=\Delta_0/2(q^{M}-1)$ and $\Delta_0$ is the quantization step size of controlling the range of the lattice quantizer. 
+% The normalized weights are therefore $\widetilde{\mathbf{W}}_{i,:} = 
+% \beta_{\mathrm{row},i}\,\mathbf{W}_{i,:}$. Derivation of normalization constant is present in \cite{banner2018aciq}.
+
+% In principle, the normalization factor $\beta$ can be applied either (i) \emph{per row}, (ii) \emph{per block} after tiling the row into contiguous $n$-D vectors. A block-wise scheme assigns a separate $\beta$ to each $n$-D block, allowing finer control over local dynamic range, but it also incurs a storage overhead because both the quantized blocks and their corresponding block-wise $\beta$ values must be retained. During the forward pass, the stored quantized representation is loaded and rescaled by its associated $\beta$. Therefore, we choose \emph{per row} $\beta$ in our experiments.
+
+% Unlike learnable quantization methods such as LSQ+ \cite{lsq+}, which optimize scale and offset parameters via backpropagation, our method uses \emph{fixed, heuristic} dynamic-range calibration derived from weight statistics and lattice geometry. Dynamic-range calibration is entirely heuristic and non-learnable. In addition, we use an exponential moving-average estimate of feature means for centering, which stabilizes training without introducing extra trainable parameters.
+
+\noindent \textbf{Dynamic-range calibration.}
+Given a weight matrix $W_{\mathrm{original}} \in \mathbb{R}^{O \times I}$, we normalize the dynamic range of each row using a \emph{row-wise heuristic scale} $\beta_{\mathrm{row},i}$. For row $i$, we estimate its empirical standard deviation $\sigma_i$ and define $\beta_{\mathrm{row},i} = Y_{\max}/C_b \sigma_i$ where $C_b$ is a safety constant and $Y_{\max}=\Delta_0 (q^{M}-1)/2$ is a lattice-controlled range parameter.
+The normalized weights are $\widetilde{\mathbf{W}}_{i,:}=\beta_{\mathrm{row},i}\mathbf{W}_{i,:}$.
+Derivation of normalization constant, under scalar quantization regime, is present in \cite{banner2018aciq}. In principle, $\beta$ may be applied per row or per block after tiling into $n$-D vectors. While block-wise scaling provides finer local control, it requires storing additional scaling factors. We therefore adopt \emph{per-row} scaling in all experiments.
+
+Unlike learnable quantization methods such as LSQ+ \cite{lsq+}, which optimize scale and offset parameters via backpropagation, our dynamic-range calibration is entirely \emph{fixed and heuristic}, derived solely from weight statistics and lattice geometry. In addition, we employ an exponential moving-average estimate of feature means for centering, which improves training stability without introducing extra trainable parameters.
+
+\noindent \textbf{Blockwise $E_8$ quantization.} Since the $E_8$ lattice operates in $\mathbb{R}^8$, each row of $\widetilde{\mathbf{W}}$ is reshaped into 8-D blocks. For a block vector $\widetilde{\mathbf{w}} \in \mathbb{R}^8$, we compute its nearest lattice point (CVP) through the projection operator (detailed in \textit{Appendix}: \textit{Algorithm \ref{qe8})} $ \widehat{\mathbf{W}}= Q_{\mathrm{E8}}\bigl(
+    \widetilde{\mathbf{w}}
+  \bigr)$
+which evaluates candidates in both $D_8$ and its coset $D_8 + (0.5)^8$ with parity correction, guaranteeing that $\widehat{\mathbf{w}}$ lies exactly in $\Lambda_{E_8}$. The operator $Q_{\mathrm{E8}}$ used in Algorithm~\ref{alg:fused-e8-hnlq} can be instantiated either as the \emph{exact} nearest-neighbor (\textit{Appendix Algorithm~\ref{qe8}}) or as the \emph{Babai} nearest-plane approximation (\textit{Appendix Algorithm~\ref{alg:e8-babai}}). Exact computes the true closest lattice point, while the Babai method provides a faster but approximate projection. After quantizing all blocks, the matrix is reconstructed as $\widetilde{\mathbf{W}}_{\mathrm{quant}}$ and rescaled; optionally, element-wise clipping is applied for numerical stability during training.
+
+\noindent \textbf{Lattice QAT via a fused STE approximation.} Unlike HNLQ, which performs full hierarchical encoding and decoding (Algorithms 1 and 3 of \cite{hnlq}), our method implements \textit{Lemma 1} \cite{hnlq} and collapses the entire lattice quantizer into one fused operator that is sufficient for QAT. During the forward pass, each 8-D block is simply mapped to its nearest E8 lattice point, and during the backward pass, we apply an STE of the form $\tilde{x} = x +\mathrm{SG}(Q_{E8}(x) -x))$, where $\mathrm{SG}(\cdot)$ is the stop-gradient operator. This treats the projection as identity in the gradient path. This fused design removes the need for explicit encoding and residual loops that are only necessary for storage or communication, not for learning. The fused nearest-point operator alone is enough for stable QAT, even at varied $q$ and $M$, making the approach significantly simpler and more efficient than the original HNLQ pipeline.
+
+\noindent \textbf{Relation to HNLQ and the role of $(q,M)$.}
+Our method is a simpler adaptation of HNLQ where the fine lattice is $E_8$, and the hierarchical digits are implicitly produced through the fused projection with flexibility and minimal overhead. In HNLQ, the nearest lattice point is expressed through radix $q$ digits across $M$ nested layers. In our QAT setup, $(q,M)$ still determines the effective representable radius $Y_{\max}$ and the trade-off between quantization accuracy and overload risk.
+
+\noindent \textbf{Reconstruction and optional clipping.}
+After all blocks are projected, the normalized matrix is rescaled via $\beta_{\mathrm{row},i}^{-1}$. An optional elementwise clipping stabilizes the early QAT phase by preventing large outlier weights from destabilizing the lattice projection.
+
+
+\begin{algorithm}[H]
+\caption{Fused E8 vector quantization}
+\label{alg:fused-e8-hnlq}
+\scriptsize
+\DontPrintSemicolon
+\KwIn{Weights $W \in \mathbb{R}^{O \times I}$; radix $q$; digits $M$; projection $Q_{\mathrm{E8}}$; block size $8$; clip $\tau$.}
+\KwOut{$\widehat{W}$.}
+
+\For{$i=1..O$}{%
+  $\beta_i \!=\! Y_{\max}/(C_b \sigma(W_{i,:}))$, 
+  $\widetilde{W}_{i,:} \!=\! \beta_i W_{i,:}$
+}
+
+Split $\widetilde{W}$ into 8-D blocks $\widetilde{\mathbf{w}}_k$.
+
+\For{each block $k$}{
+  $\widehat{\mathbf{w}}_k = Q_{\mathrm{E8}}(\widetilde{\mathbf{w}}_k)$
+}
+
+Assemble $\widehat{W}$ and invert scaling:
+$\widehat{W}_{i,:} = \widehat{W}_{i,:}/\beta_i$.
+
+Clip: $\widehat{W}=\operatorname{clip}(\widehat{W},-\tau,\tau)$.
+\end{algorithm}
+
+\subsection{Scalar quantization}
+SQ depicted in Algorithm \ref{alg:fused-sq-hnlq} follows the same normalization approach used in the VQ, but quantizes each weight independently rather than operating on $n$-D blocks. Here, scaling factor $\beta_i = \frac{2^{b-1}-1}{C_b \,\sigma_i}$ maps the dynamic range of that row into the representable interval of a $b$-bit signed uniform quantizer. The rest things remain the same. For a unified framework and to make it comparable to VQ, $\widetilde{W}$ is partitioned into contiguous 8-D blocks, but unlike VQ, no inter-component structure is exploited. Each block $\widetilde{\mathbf{w}}_k$ is quantized elementwise using the scalar operator $\widehat{\mathbf{w}}_k = Q_{\mathrm{SQ}}(\widetilde{\mathbf{w}}_k)$ where $Q_{\mathrm{SQ}}(\cdot)$ (detailed in \textit{Appendix Algorithm \ref{alg:lsq-scalar-short}}) is a uniform rounding quantizer. 
+
+% The quantized blocks are reassembled into the full matrix, and the normalization is rescaled by dividing each row by its corresponding scale $\beta_i$. An optional clipping operation
+% $\widehat{W} \leftarrow \operatorname{clip}(\widehat{W}, -\tau, \tau)$ is applied to improve numerical stability during training.
+
+Although SQ treats each weight independently, it can be viewed as a special case of VQ. In the VQ formulation, quantization is performed by projecting each 8-D block onto the lattice generated by a basis matrix $G$. When the generator matrix is chosen as the identity, $G=I$, the lattice reduces to $\mathbb{Z}^8$, and the nearest-lattice projection becomes simple element-wise rounding. Thus, SQ corresponds exactly to VQ with an identity lattice, and the two differ only in the structure of the underlying quantizer. Because the weights are still grouped into 8-D blocks for implementation consistency, SQ remains architecturally comparable to VQ. This demonstrates that our QAT framework is generic and extensible: the same normalization, row-wise scaling, and fused STE machinery seamlessly handle both structured lattice-based VQ and unstructured SQ under a unified formulation. 
+
+Existing SQ-QAT methods primarily differ in how quantization ranges are determined. Brevitas \cite{brevitas} adopts an empirical approach with fixed design choices, while LSQ+ \cite{lsq+} employs learnable, data-driven scaling parameters optimized during training. In contrast, ACIQ \cite{banner2018aciq} derives clipping thresholds analytically based on assumed weight or activation distributions. Our SQ follows an empirical but adaptive scaling strategy based on simple heuristics without any learnable parameters. Implementation details of integrating SQ into the framework are provided in the \emph{Appendix}.
+
+
+\begin{algorithm}[H]
+\caption{Scalar quantization}
+\label{alg:fused-sq-hnlq}
+\scriptsize
+\DontPrintSemicolon
+\KwIn{Weights $W$; bit-width $b$; scalar quantizer $Q_{\mathrm{SQ}}$; block size $8$; clip $\tau$.}
+\KwOut{$\widehat{W}$.}
+
+\For{$i=1..O$}{%
+  $\beta_i = (2^{b-1}-1)/(C_b \sigma(W_{i,:}))$, 
+  $\widetilde{W}_{i,:} = \beta_i W_{i,:}$
+}
+
+Split $\widetilde{W}$ into 8-D blocks $\widetilde{\mathbf{w}}_k$.
+
+\For{each block $k$}{
+  $\widehat{\mathbf{w}}_k = Q_{\mathrm{SQ}}(\widetilde{\mathbf{w}}_k)$
+}
+
+Assemble $\widehat{W}$ and invert scaling:
+$\widehat{W}_{i,:} = \widehat{W}_{i,:}/\beta_i$.
+
+Clip: $\widehat{W}=\operatorname{clip}(\widehat{W},-\tau,\tau)$.
+\end{algorithm}
+
+
+
+% \begin{algorithm}[H]
+% \caption{Fused scalar quantization}
+% \setcounter{AlgoLine}{0}
+% \label{alg:fused-sq-hnlq}
+% \scriptsize
+% \DontPrintSemicolon
+% \KwIn{
+%   original weights $\mathbf{W}_{\mathrm{original}} \in \mathbb{R}^{O \times I}$; 
+%   radix $q \in \mathbb{N}$, levels $M \in \mathbb{N}$; 
+%   step size $\Delta_0 = 1.5$;
+%   row safety factor $C_b = 5.0$;
+%   scalar quantizer $Q_{\mathrm{SQ}} : \mathbb{R} \to \mathbb{Z}$; \\
+%   block dimension $B = 8$, clip value $\tau_{\mathrm{clip}}$, 
+%   small constant $\varepsilon > 0$.
+% }
+% \KwOut{
+%   quantized weights $\mathbf{W}_{\mathrm{quant}} \in \mathbb{R}^{O \times I}$.
+% }
+
+% \nl Line $1-2$ same as in Algo \ref{alg:fused-e8-hnlq} 
+
+% \nl $b \;\gets\; \bigl\lfloor M \log_2(q) \bigr\rfloor,
+% \qquad
+% Y_{\max} \;\gets\; 2^{b-1} - 1$ \tcp*[r]{effective scalar dynamic range}
+
+% \nl Line $4$ same as in Algo \ref{alg:fused-e8-hnlq} 
+
+% \nl \textbf{Scalar quantization.} Let $B_r \gets I / B$ be the number of 8-D blocks per row (assume $I$ divisible by $B$).\\
+
+% $\widetilde{\mathbf{W}}
+%   \;\to\;
+%   \widetilde{\mathbf{W}}^{\mathrm{blocks}}
+%   \in \mathbb{R}^{(O B_r) \times B},$  \tcp*[r]{Reshape}
+
+% so that each row of $\widetilde{\mathbf{W}}^{\mathrm{blocks}}$ is an 8-D vector.\\
+
+% \For{$k = 1$ \KwTo $O B_r$}{%
+%   $\widehat{\mathbf{W}}^{\mathrm{blocks}}_k
+%     \;\gets\;
+%     Q_{\mathrm{SQ}}\bigl(
+%       \widetilde{\mathbf{W}}^{\mathrm{blocks}}_k
+%     \bigr);$
+%   \tcp*[r]{scalar quantization, elementwise with STE in backward pass}
+% }
+
+% $\widehat{\mathbf{W}} \in \mathbb{R}^{O \times I}.$ \tcp*[r]{Reshape back to matrix form}
+% \nl  Line $6-7$ same as in Algo \ref{alg:fused-e8-hnlq}
+
+% \end{algorithm}
+
+% moved to appendix
+
+%\subsection{Integration into the Quantization Pipeline}
+%\label{sec:qat-integration}
+%The proposed scalar and vector quantizers are integrated into the MLP classifier and BERT through a fused quantized linear operator. 
+%Each fully connected layer $\mathrm{FC}(x) = W x + b$
+%is replaced by a quantized operator $
+%\mathrm{FC}_{\mathrm{Q}}(x) = \widehat{W}\, x + b
+%$ where $\widehat{W}$ is obtained using either fused $E_8$ VQ 
+%(Algorithm~\ref{alg:fused-e8-hnlq}) or SQ
+%(Algorithm~\ref{alg:fused-sq-hnlq}).  
+%In both PTQ and QAT settings, only the weights are quantized.
+
+%\noindent In \textbf{PTQ setting}, $\widehat{W}$ is computed once using the learned full-precision weights, and the network is evaluated without any further training. Dynamic ranges are estimated from the trained model, and no gradient updates are involved. Whereas in \textbf{QAT setting}, quantization is applied on every forward pass. The network uses $\widehat{W}$ for inference, but gradients are applied to the underlying full-precision parameters $W$ through STE. 
+
+%In VQ, the fused implementation ensures that scaling, block partitioning, projection, reconstruction, and clipping occur within a single differentiable operator, improving numerical stability and reducing memory transfers during training.
+
+\section{Experiments and Results}
+We evaluate our quantization framework on MLP and pre-trained BERT, comparing SQ and VQ under both PTQ and QAT across multiple bit-widths. Experiments span four text-classification datasets: ReCon and AntShield (PII detection), IMDB sentiment, and SMS Spam. Only weights are quantized; activations remain FP32. We study two base scales, $\Delta_0 \in\{0.3,1.5\}$, with $q \in [2,8]$ and $M \in [1,4]$. Additional results for higher bit budgets ($>4$) are provided in the \textit{Appendix}. {Additional results, including (i) higher-bit settings ($>4$ bits), (ii) another PTQ baseline (QuiP\#) (iii) experiments on alternative lattice structure, (iv) multi-class classification, and (v) activation quantization using ACIQ, are reported in the \textit{Appendix} to assess the generality of the proposed approach, with encouraging results and new insights. Note: M-Bit(s) refer to bit-width of MLP.}
+% \begin{figure}[]
+% \centering
+% \begin{tabular}{c c}
+%     \includegraphics[ width=0.49\linewidth, height=0.3\linewidth]{Plots/QATvsPTQ_Final/ReCon_comp_zoomed.png} &
+%     % \includegraphics[ width=0.49\linewidth, height=0.3\linewidth]{Plots/QATvsPTQ_Delta1.5/ants_qatvsptq_zoomed.png} \\
+%     \includegraphics[ width=0.49\linewidth, height=0.3\linewidth]{Plots/QATvsPTQ_Final/IMDB_comp_zoomed.png} 
+%     % &
+%     % \includegraphics[ width=0.49\linewidth, height=0.3\linewidth]{Plots/QATvsPTQ_Delta1.5/spam_qatvsptq_zoomed.png} \\
+% \end{tabular}
+% \caption{PTQ vs. QAT on ReCon and IMDB ($\Delta_0=1.5$). For each bit-width, we use the nearest $(q,M)$ setting and report the best score when multiple configurations match the bit budget.}
+% \label{fig:ptqvsqat_zoomed}
+% \end{figure}
+
+\begin{table}[]
+    \centering
+    \tiny
+    \caption{PTQ vs. QAT ($\Delta_0=1.5$ for all VQ settings; $\Delta_0=0.3$ for Babai PTQ). E and B denote Exact and Babai, respectively; M-Bits(s) represent MLP bits.}
+    \label{ptqvsQAT-1}
+    \scalebox{0.9}{
+    \begin{tabular}{| p{0.87cm}|p{0.65cm}|p{0.7cm}|p{0.7cm}|p{0.65cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|p{0.65cm}|p{0.7cm}|p{0.7cm}|p{0.65cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|} \hline
+\textbf{M-Bit(s)} & \multicolumn{3}{|c}{\textbf{QAT}} & \multicolumn{4}{|c}{\textbf{PTQ}} & \multicolumn{3}{|c}{\textbf{QAT}} & \multicolumn{4}{|c|}{\textbf{PTQ}} \\ \cline{2-15}
+& \textbf{Brevitas} & \textbf{VQ-E} &\textbf{ VQ-B} & \textbf{Brevitas} & \textbf{VQ-E} & \textbf{VQ-B} &\textbf{ QuIP} & \textbf{Brevitas} & \textbf{VQ-}E & \textbf{VQ-B} & \textbf{Brevitas} & \textbf{VQ-E} & \textbf{VQ-B} &\textbf{ QuIP}  \\ \hline
+ \rowcolor{black!20}
+& \multicolumn{7}{c|}{\textbf{ReCon}} &  \multicolumn{7}{|c|}{\textbf{IMDB}}\\ \hline
+1.00    & 	Error &	69.46&	\textbf{87.92}& Error   & 8.27 & 12.91 & 57.03 & Error	& 67.22&	\textbf{80.60}&	Error &	31.35&	41.94&	79.11 \\
+1.58 & - & \textbf{92.87} & 89.55 & - & 47.20 & 10.19 & - & - & \textbf{82.97} & 81.84 & - & 78.91 & 55.36 & -\\
+
+2.00 	& 	92.19&	\textbf{92.87}&	92.30&32.08   &  46.39 & 16.21 & 87.91 & 84.75&	84.05&	82.28&	63.06&	83.72&	63.46&	\textbf{85.88} \\
+
+2.32 & - & \textbf{92.90} & 91.39 & - & 66.45 & 14.71 & - & - & 83.19 & 81.93 & - & 78.67 & 68.81 & -\\
+
+2.58 & - & \textbf{92.93} & 91.81 & - & 71.39 & 19.78 & - & - & 82.59 & 81.28 & - & 83.59 & 77.78 & -\\
+
+2.81 & - & \textbf{93.44} & 91.53 & - & 63.12 & 40.60 & - & - & 82.79 & 82.88 & - & 81.15 & 77.60 & -\\
+3.00 	 & 	\textbf{93.38}&	93.23&	93.13&48.42   & 66.12 & 45.31 & 92.24 & 85.49&	83.12&	82.73&	82.19&	83.03&	80.16&	\textbf{85.93} \\
+3.17 & - & 93.24 & 91.72 & - & 65.02 & 44.28 & - & - & 84.43 & 82.55 & - & 84.38 & 82.32 & -\\
+4.00 	&	92.95 &	\textbf{93.13} &	92.22 & 90.90   & 65.25 &  56.50 & 92.89 & 85.14&	84.03&	82.03&	84.89&	82.75&	84.81&	\textbf{85.63} \\ \hline
+\rowcolor{black!20}
+& \multicolumn{7}{c|}{\textbf{AntShield}} &  \multicolumn{7}{|c|}{\textbf{SMS Spam}}\\ \hline
+1.00	& Error	& 68.04&	\textbf{87.91}&	Error&	0.97&	29.68&	71.74&	Error	& 78.10&	\textbf{90.55}&	Error&	0.00&	13.61&	84.62\\
+
+1.58 & - & 92.09 & 91.23 & - & 33.14 & 23.21 & - & - & \textbf{93.65} & 95.24 & - & 86.55 & 44.14 & -\\
+
+2.00	& 91.67&	\textbf{92.59}&	91.31&	17.45&	52.18&	27.97&	83.28&	\textbf{97.30}&	94.95&	95.95&	0.00&	74.31&	75.95&	96.60\\
+
+2.32 & - & \textbf{92.48} & 90.55 & - & 61.14 & 34.98 & - & - & 96.00 & 94.52 & - & 76.41 & 83.85 & -\\
+
+2.58 & - & \textbf{92.73} & 92.06& - & 57.06 & 39.35 & - & - & 95.36 & 95.33 & - & 65.21& 85.29 & -\\
+
+2.81 & - & \textbf{92.82}& 91.46 & - & 59.10 & 33.25 & - & - & 97.28 & 95.02 & - & 65.49 & 77.04 & -\\
+
+3.00	& \textbf{92.92}&	92.33&	92.11&	72.79&	56.73&	24.40&	71.75&	96.30&	\textbf{96.95}&	95.62&	96.00&	68.98&	85.30&	95.68\\
+
+3.17 & - & 92.25 & 90.66 & - & 29.86 & 15.13 & - & - & 96.64 & 92.51 & - & 66.67 & 76.36 & -\\
+
+4.00	& \textbf{93.12}&	92.83&	91.90&	77.88&	52.68&	54.24&	92.34&	96.32&	94.59&	95.21&	\textbf{96.62}&	62.08&	67.42&	96.00\\ \hline
+    \end{tabular}}
+    \end{table}
+
+% \subsection{QAT vs. PTQ}
+% Table~\ref{ptqvsQAT-1} compares QAT and PTQ across bit-widths on ReCon and IMDB. For each bit-width, the nearest $(q,M)$ setting is used (e.g., 6.97 bit for 7 bit when an exact match is unavailable), and the best score is reported when multiple configurations match the bit budget. The largest performance gap appears in the low-bit regime. At 1~bit, PTQ methods largely fail, Brevitas-PTQ collapses on both datasets, and VQ-PTQ variants achieve very low F1, and QuIP also remains usable. In contrast, QAT enables stable training at 1~bit, with VQ-Babai achieving strong performance on ReCon (87.92) and IMDB (80.60), demonstrating that end-to-end adaptation is essential at such low precision.
+
+% In the 2-4~bit range, QAT and VQ-PTQ and QuIP become comparable. On ReCon, all QAT methods rapidly approach saturation ($\approx$93 F1) and QuIP, yielding similar performance. On IMDB, QuIP remains consistently competitive, while QAT provides only marginal improvements. At higher bit-widths, performance differences further narrow and all QAT approaches stabilize. But for PTQ, performance is poor for VQ approaches in ReCon while good in IMDB. 
+
+% Overall, in the < 4-bit regime, lattice-based QAT consistently outperforms lattice-based PTQ, which struggles without gradient adaptation; consequently, VQ-QAT is more reliable here.
+\subsection{QAT vs. PTQ}
+Table~\ref{ptqvsQAT-1} compares QAT and PTQ in the 1–4\,bit regime, reporting the best score when multiple configurations match a given bit budget in case of VQ (eg, 2b has (2,2) and (4,1)). A key advantage of lattice-based VQ is its ability to operate at fractional bit-widths, yielding performance comparable to or better than integer-bit baselines. For example, at 1.58\,bits, VQ-QAT achieves 92.87 on ReCon and 82.97 on IMDB, closely matching or exceeding the corresponding 2-bit performance, while no PTQ baseline achieves reliable accuracy at these bit-widths.
+
+At 1\,bit, PTQ methods largely fail across datasets, whereas VQ-QAT remains stable, achieving 87.92 on ReCon, 87.91 on AntShield, and 90.55 on SMS Spam. In the 2–4\,bit range, QAT either closely matches or exceeds strong PTQ baselines in majority of cases. On IMDB, QuIP remains competitive, but QAT closely matches its performance (e.g., 85.49 vs. 85.93 at 3\,bits).
+
+Overall, except on IMDB where QuIP is strong, QAT in majority of cases matches or outperforms PTQ across datasets. Allowing fractional bit-widths enables VQ-QAT to achieve near–integer-bit performance at lower effective precision, making lattice-based QAT a more flexible and reliable choice in the low-bit regime.
+
+
+\begin{table}[]
+    \centering
+        \caption{Comparison of SQ and VQ with $\Delta_0$=1.5. Here, OL represents overload. Here, M-Bits(s) represent MLP bits.}
+        \label{SQVQ-8}
+    \tiny
+    \begin{tabular}{|p{1.1cm}| 
+    p{0.6cm}| p{0.6cm}| p{0.6cm} |
+    p{0.6cm} |p{0.6cm}| p{0.6cm}| 
+    p{0.6cm}| p{0.6cm} |p{0.6cm} |
+    p{0.6cm}|p{0.6cm}|p{0.6cm}|} \hline
+        \textbf{M-Bit(s)} & 
+        \textbf{SQ} & \multicolumn{2}{c|}{\textbf{VQ-Exact}} & \multicolumn{2}{c|}{\textbf{VQ-Babai}}&
+        \textbf{SQ} & \multicolumn{2}{c|}{\textbf{VQ-Exact}} & \multicolumn{2}{c|}{\textbf{VQ-Babai}}\\
+        
+        \cline{3-6} \cline{8-11} \cline{12-13}
+        & &  \textbf{F1} & \textbf{OL\%} &
+        \textbf{F1} & \textbf{OL\%} & &
+        \textbf{F1} & \textbf{OL\%} & 
+        \textbf{F1} & \textbf{OL\%} \\ \hline
+        \rowcolor{black!20}
+        & \multicolumn{5}{c|}
+        {\textbf{ReCon} (FP-93.93)} & \multicolumn{5}{c|} {\textbf{IMDB} (FP-85.59)}\\ \hline
+
+1.00b(2,1)   & \multirow{2}{*}{Error} &	69.46   & 0.02      &  87.92 &	0 		& \multirow{2}{*}{Error} & 67.22 &	0.00  & 80.60	& 0   \\ 
+1.58b(3,1)   &                        & \textbf{92.87}   & 2.25      &  89.55 &	0 		&                        & \textbf{82.97} &	2.62  & 81.84	& 0   \\ \cline{2-2} \cline{7-7}
+2.00b(2,2)   & \multirow{5}{*}{90.87} &	78.79	& 60.81     &  92.30 &	0 		& \multirow{5}{*}{83.23} & 83.03 &	61.42 & 82.28	& 0   \\
+2.00b(4,1)   &                        &	92.87	& 0.02      &  92.30 &	0 		&                        & \textbf{84.05} &	0.02  & 82.28	& 0   \\
+2.32b(5,1)   &                        &	92.90	& 0.00      &  91.39 &	0 		&                        & 83.19 &	0.01  & 81.93	& 0   \\
+2.58b(6,1)   &                        &	92.93	& 0.01      &  91.81 &	6.98	&                        & 82.59 &	0.01  & 81.28	& 6.60   \\
+2.81b(7,1)   &                        &	\textbf{93.44}	& 0.00      &  91.53 &	0 		&                        & 82.79 &	0.01  & 82.88	& 0   \\ \cline{2-2} \cline{7-7}
+3.00b(2,3)   & \multirow{3}{*}{\textbf{93.49}} &	79.56	& 79.14     &  93.13 &	0 		& \multirow{3}{*}{83.98} & 83.12 &	79.88 & 82.73	& 0   \\
+3.00b(8,1)   &                        &	93.23	& 0.00      &  91.25 &	0 		&                        & 83.12 &	0.00  & 81.92	& 0   \\
+3.17b(3,2)   &                        &	93.24	& 1.00      &  91.72 &	0 		&                        & \textbf{84.43} &	1.28  & 82.55	& 0   \\ \cline{2-2} \cline{7-7}
+4.00b(2,4)   & \multirow{2}{*}{92.84} &	80.82	& 83.71     &  92.22 &	0 		& \multirow{2}{*}{83.86} & 84.03 &	84.97 & 82.03	& 0   \\
+4.00b(4,2)   &                        &	\textbf{93.13}	& 0.40      &  92.22 &	0 		&                        & 83.42 &	0.39  & 82.03	& 0   \\ \hline
+\rowcolor{black!20}
+  & \multicolumn{5}{c|}
+        {\textbf{AntShield} (FP: 93.22)} & \multicolumn{5}{c|} {\textbf{SMS Spam} (FP: 95.65)}\\ \hline
+1.00b(2,1)   & \multirow{2}{*}{Error} & 68.04 & 0.04  & 87.91  &	0      & \multirow{2}{*}{Error} & 78.10 &	0.01	 & 90.55 & 0 \\
+1.58b(3,1)   &                        & \textbf{92.09} & 2.38  & 91.23  &	0      &                        & 93.65 &   2.25	 & \textbf{95.24} & 0 \\  \cline{2-2} \cline{7-7}
+2.00b(2,2)   & \multirow{5}{*}{90.83} & 78.25 &	60.68 & 91.31  &	0      & \multirow{5}{*}{95.59} & 90.41 &	59.01    & 95.95 & 0 \\
+2.00b(4,1)   &                        & 92.59 &	0.01  & 91.31  &	0      &                        & 94.95 &	0.01	 & 95.95 & 0 \\
+2.32b(5,1)   &                        & 92.48 &	0.00  & 90.55  &	0      &                        & 96.00 &	0.01	 & 94.52 & 0 \\
+2.58b(6,1)   &                        & 92.73 &	0.01  & 92.06  &	6.716  &                        & 95.36 &	0.02	 & 95.33 & 6.333 \\
+2.81b(7,1)   &                        & \textbf{92.82} &	0.00  & 91.46  &	0      &                        & \textbf{97.28} &	0.01	 & 95.02 & 0 \\  \cline{2-2} \cline{7-7}
+3.00b(2,3)   & \multirow{3}{*}{91.93} & 77.21 &	78.64 & 92.11  &	0      & \multirow{3}{*}{94.98} & 90.10 &	76.70    & 94.31 & 0 \\
+3.00b(8,1)   &                        & \textbf{92.33} &	0.01  & 91.77  &	0      &                        & \textbf{96.95} &	0.01	 & 95.62 & 0 \\ 
+3.17b(3,2)   &                        & 92.25 &	1.14  & 90.66  &	0      &                        & 96.64 &	1.42	 & 92.51 & 0 \\  \cline{2-2} \cline{7-7}
+4.00b(2,4)   & \multirow{2}{*}{92.51} & 79.12 &	84.03 & 91.90  &	0      & \multirow{2}{*}{95.62} & 92.36 &	81.96    & 95.21 & 0 \\
+4.00b(4,2)   &                        & \textbf{92.83} &	0.35  & 91.90  &	0      &                        & 94.59 &	0.30	 & 95.21 & 0 \\ \hline
+% 4.00b(16,1)&                        & 92.61   & 0.01      &  91.57 &	0 		&                        & 83.40 &   0.01 & 82.51	& 0   \\ 
+% 4.64b(5,2)   &                        &	92.94	& 0.20      &  91.50 &	0 		&                        & 82.14 &	0.24  & 81.36	& 0   \\
+% 4.75b(3,3)   &                        &	92.54	& 3.52      &  90.80 &	0 		&                        & 82.92 &	4.46  & 81.55	& 0   \\ \cline{2-2} \cline{7-7}
+% 5.17b(6,2)   & \multirow{2}{*}{93.05} &	\textbf{93.54}	& 0.19      &  90.47 &	7.62 	& \multirow{2}{*}{82.79} & \textbf{82.83} &	0.22  & 81.27	& 7.58   \\
+% % 5.61b(7,2)   &                        &	92.88	& 0.17      &  90.10 &	0 		&                        & 82.49 &	0.20  & 82.04	& 0   \\ 
+% 5.61b(7,2)   &                        &	92.88	& 0.17      &  90.10 &	0 		&                        & 82.49 &	0.20  & 82.04	& 0   \\ \cline{2-2} \cline{7-7}
+% 6.00b(4,3)   & \multirow{4}{*}{92.91} &	92.84	& 0.78      &  92.65 &	0 		& \multirow{4}{*}{82.38} & 83.06 &	0.78  & 83.08	& 0   \\
+% 6.00b(8,2)   &                        &	\textbf{93.46}	& 0.08      &  92.48 &	0 		&                        & 82.28 &	0.10  & 82.13	& 0   \\
+% 6.34b(3,4)   &                        &	93.24	& 5.04      &  90.44 &	0 		&                        & \textbf{83.81} &	6.14  & 81.80	& 0   \\
+% 6.97b(5,3)   &                        &	92.71	& 0.36      &  91.11 &	0 		&                        & 83.12 &	0.37  & 80.64	& 0   \\ \cline{2-2} \cline{7-7}
+% 7.75b(6,3)   & \textbf{93.69}                  &	93.29	& 0.36      &  91.93 &	8.08 & \textbf{82.70}                  & 82.68 &	0.34  & 82.21	& 8.06  \\ \cline{2-2} \cline{7-7}
+% 8.00b(4,4)   & \multirow{2}{*}{93.12} &	\textbf{93.23}	& 0.76      &  92.83 &	0 		& \multirow{2}{*}{83.37} & \textbf{83.82} &	0.80  & 83.32	& 0   \\
+% 8.42b(7,3)   &                        &	92.67	& 0.26      &  91.19 &	0 		&                        & 81.34 &	0.26  & 81.79	& 0   \\ \cline{2-2} \cline{7-7}
+% 9.00b(8,3)   & \multirow{2}{*}{93.17} &	93.23	& 0.14      &  91.92 &	0 		& \multirow{2}{*}{82.85} & 82.14 &	0.13  & 81.22	& 0   \\
+% 9.29b(5,4)   &                        &	\textbf{93.63}	& 0.42      &  90.27 &	0 		&                        & \textbf{83.60} &	0.44  & 81.36	& 0   \\ \cline{2-2} \cline{7-7}
+% 10.34b(6,4)  & 93.11                  &	\textbf{93.22}   & 0.36      &  91.65 &	8.10	& 81.32                  & \textbf{83.16} &	0.39  & 81.49	& 8.18 \\ \cline{2-2} \cline{7-7}
+% 11.23b(7,4)  & 92.90                  &	\textbf{92.99}   & 0.27      &  91.10 &	0 		& 82.25                  & \textbf{82.52} &	0.28  & 80.84	& 0   \\ \cline{2-2} \cline{7-7}
+% 12.00b(8,4)  & \textbf{93.16}                  &	93.06   & 0.13      &  92.12 &	0 		& 82.46                  & 81.67 &	0.13  & \textbf{82.87}	& 0   \\ \hline
+\end{tabular}
+\end{table}
+
+\subsection{Scalar vs. Vector Quantization}
+Table~\ref{SQVQ-8} compares SQ and lattice-based VQ across datasets. In the 1–1.58 bits regime, SQ consistently fails to train, whereas VQ remains stable and achieves strong performance across all datasets, establishing VQ as the only viable option under such constraints.
+
+At 2 bits, overload plays a critical role. Configurations with $q{=}2$ suffer from very high overload ($\approx$ 60–80\%) and reduced performance for VQ-Exact. In contrast, VQ configurations with reduced overload consistently achieve high F1 scores ($\approx$92–93 on ReCon and AntShield), indicating that accuracy improves as overload is controlled. In this regime, VQ variants match or exceed SQ in most cases.
+At 3 bits, SQ becomes competitive. Beyond 3 bits, performance differences narrow further, but VQ continues to exhibit more consistent behavior across configurations due to superior overload control.
+Overall, lattice-based VQ under QAT outperforms SQ in the majority of settings, particularly below 4 bits, highlighting that effective overload control—especially avoiding $q{=}2$—is crucial for robust low-bit quantization.
+
+\noindent \textbf{Role of $(q,M)$ in VQ:}
+We observe trends consistent with the geometric behavior described in \cite{hnlq}: for a fixed bit budget, configurations with larger $q$ and smaller $M$ are more stable and accurate. For example, at 4 bits, $(2,4)$ attains only 80.82 F1, whereas $(4,2)$ reaches 93.13 in VQ Exact (ReCon). When $M$ is large, and $q$ is small, residual corrections accumulate error rather than reducing it, degrading performance. From an implementation standpoint, $(4,2)$ is also attractive as it fits into a compact LUT, unlike alternatives such as $(16,1)$, which trade higher memory for minimal compute. At higher bit-widths, very large $q$ offers diminishing returns as performance saturates. Overall, accuracy favors larger $q$ and smaller $M$, while the final choice reflects a trade-off between memory and compute.
+
+% \begin{table}[]
+%     \centering
+%         \caption{Comparison of SQ and VQ across different bitwidths and datasets. -- to be changed}
+%     \scriptsize
+%     \begin{tabular}{|p{1.1cm}| 
+%     p{0.6cm}| p{0.6cm}| p{0.6cm} |
+%     p{0.6cm} |p{0.6cm}| p{0.6cm}| 
+%     p{0.6cm}| p{0.6cm} |p{0.6cm} |
+%     p{0.6cm}|p{0.6cm}|p{0.6cm}|} \hline
+%         \textbf{Bits} & 
+%         \textbf{SQ} & \multicolumn{2}{c|}{\textbf{VQ}} &
+%         \textbf{SQ} & \multicolumn{2}{c|}{\textbf{VQ}} & 
+%         \textbf{SQ} & \multicolumn{2}{c|}{\textbf{VQ}} & 
+%         \textbf{SQ} & \multicolumn{2}{c|}{\textbf{VQ}} \\
+         
+%         \cline{3-4} \cline{6-7} \cline{9-10} \cline{12-13}
+%         & &  \textbf{F1} & \textbf{OL(\%)} & &
+%         \textbf{F1} & \textbf{OL(\%)} & &
+%         \textbf{F1} & \textbf{OL(\%)} & &
+%         \textbf{F1} & \textbf{OL(\%)} \\ \hline
+%         & \multicolumn{3}{c|}
+%         {\textbf{ReCon}} & \multicolumn{3}{c|}{\textbf{AntShield}}  & \multicolumn{3}{c|}{\textbf{IMDB}} & \multicolumn{3}{c|}{\textbf{SMS SPAM}}\\ \hline
+% 1.00b(2,1)  & Error  &	69.46   & 0.02  & 	Error &     68.04 & 0.04   &	Error &	67.22 &	0.00	& 	Error &	78.10 &	0.01     \\
+% 1.58b(3,1)	& Error	 &  92.87   & 2.25	&   Error &     92.09 & 2.38   &	Error &	82.97 &	2.62	& 	Error & 93.65 &	2.25     \\
+% 2.00b(2,2)	& 90.87  &	78.79	& 60.81 & 	90.83 &  	78.25 &	60.68  &	83.23 &	83.03 &	61.42	& 	95.59 &	90.41 &	59.01    \\
+% 2.00b(4,1)	& 90.87  &	92.87	& 0.02  & 	90.83 &  	92.59 &	0.01   &	83.23 &	84.05 &	0.02	& 	95.59 &	94.95 &	0.01	 \\
+% 2.32b(5,1)	& 90.87  &	92.90	& 0.00  & 	90.83 &  	92.48 &	0.00   &	83.23 &	83.19 &	0.01	& 	95.59 &	96.00 &	0.01	 \\
+% 2.58b(6,1)	& 90.87  &	92.93	& 0.01  & 	90.83 &  	92.73 &	0.01   &	83.23 &	82.59 &	0.01	& 	95.59 &	95.36 &	0.02	 \\
+% 2.81b(7,1)	& 90.87  &	93.44	& 0.00  & 	90.83 &  	92.82 &	0.00   &	83.23 &	82.79 &	0.01	& 	95.59 &	97.28 &	0.01	 \\
+% 3.00b(2,3)	& 93.49  &	79.56	& 79.14 & 	91.93 &  	77.21 &	78.64  &	83.98 &	83.12 &	79.88	& 	94.98 &	90.10 &	76.70    \\
+% 3.00b(8,1)	& 93.49  &	93.23	& 0.00  & 	91.93 &  	92.33 &	0.01   &	83.98 &	83.12 &	0.00	& 	94.98 &	96.95 &	0.01	 \\
+% 3.17b(3,2)	& 93.49  &	93.24	& 1.00  & 	91.93 &  	92.25 &	1.14   &	83.98 &	84.43 &	1.28	& 	94.98 &	96.64 &	1.42	 \\
+% 4.00b(2,4)	& 92.84  &	80.82	& 83.71 & 	92.51 &  	79.12 &	84.03  &	83.86 &	84.03 &	84.97	& 	95.62 &	92.36 &	81.96    \\
+% 4.00b(4,2)	& 92.84  &	93.13	& 0.40  & 	92.51 &  	92.83 &	0.35   &	83.86 &	83.42 &	0.39	& 	95.62 &	94.59 &	0.30	 \\
+% 4.64b(5,2)	& 92.84  &	92.94	& 0.20  & 	92.51 &  	92.69 &	0.15   &	83.86 &	82.14 &	0.24	& 	95.62 &	96.64 &	0.25	 \\
+% 4.75b(3,3)	& 92.84  &	92.54	& 3.52  & 	92.51 &  	92.52 &	3.42   &	83.86 &	82.92 &	4.46	& 	95.62 &	96.62 &	4.49	 \\
+% 5.17b(6,2)	& 93.05  &	93.54	& 0.19  & 	92.62 &  	92.62 &	0.19   &	82.79 &	82.83 &	0.22	& 	94.39 &	96.32 &	0.23	 \\
+% 5.61b(7,2)	& 93.05  &	92.88	& 0.17  & 	92.62 &  	92.12 &	0.16   &	82.79 &	82.49 &	0.20	& 	94.39 &	94.43 &	0.18	 \\
+% 6.00b(4,3)	& 92.91  &	92.84	& 0.78  & 	92.62 &  	92.22 &	0.67   &	82.38 &	83.06 &	0.78	& 	96.00 &	96.30 &	0.70	 \\
+% 6.00b(8,2)	& 92.91  &	93.46	& 0.08  & 	92.62 &  	92.10 &	0.08   &	82.38 &	82.28 &	0.10	& 	96.00 &	96.97 &	0.10	 \\
+% 6.34b(3,4)	& 92.91  &	93.24	& 5.04  & 	92.62 &  	92.29 &	4.71   &	82.38 &	83.81 &	6.14	& 	96.00 &	96.93 &	6.32	 \\
+% 6.97b(5,3)	& 92.91  &	92.71	& 0.36  & 	92.62 &  	92.73 &	0.42   &	82.38 &	83.12 &	0.37	& 	96.00 &	96.30 &	0.46	 \\
+% 7.75b(6,3)	& 93.69  &	93.29	& 0.36  & 	92.27 &  	92.45 &	0.35   &	82.70 &	82.68 &	0.34	& 	95.33 &	95.97 &	0.39	 \\
+% 8.00b(4,4)	& 93.12  &	93.23	& 0.76  & 	92.54 &  	91.96 &	0.78   &	83.37 &	83.82 &	0.80	& 	95.30 &	97.63 &	0.81	 \\
+% 8.42b(7,3)	& 93.12  &	92.67	& 0.26  & 	92.54 &  	92.51 &	0.24   &	83.37 &	81.34 &	0.26	& 	95.30 &	95.97 &	0.25	 \\
+% 9.00b(8,3)	& 93.17  &	93.23	& 0.14  & 	91.98 &  	91.78 &	0.13   &	82.85 &	82.14 &	0.13	& 	95.33 &	96.60 &	0.12	 \\
+% 9.29b(5,4)	& 93.17  &	93.63	& 0.42  & 	91.98 &  	92.51 &	0.43   &	82.85 &	83.60 &	0.44	& 	95.33 &	95.68 &	0.48	 \\
+% 10.34b(6,4) & 93.11  &	93.22   & 0.36  &	92.29 &	    92.05 &	0.34   &	81.32 &	83.16 &	0.39	& 	96.30 &	95.65 &	0.41	 \\
+% 11.23b(7,4) & 92.90  &	92.99   & 0.27  &	92.13 &	    91.97 &	0.24   &	82.25 &	82.52 &	0.28	& 	96.32 &	95.68 &	0.28	 \\
+% 12.00b(8,4) & 93.16  &	93.06   & 0.13  &	92.29 &	    92.03 &	0.12   &	82.46 &	81.67 &	0.13	& 	95.97 &	94.70 &	0.13	 \\ \hline
+
+
+        
+%             \end{tabular}
+
+%     \label{tab:results_vq_sq}
+% \end{table}
+
+
+
+% \begin{table}[]
+%     \centering
+%     \caption{Existence of overload > 1 across all datasets for VQ-Exact ($\Delta_0=0.3$).}
+%      \scriptsize
+%     \begin{tabular}{|p{1cm}|p{1cm}|p{1cm}|p{1cm}|p{1cm}|p{1cm}|p{1cm}|p{1cm}|p{1cm}|} \hline
+%       \textbf{Bits}   & \textbf{F1} &\textbf{ OL(\%)} & \textbf{F1} & \textbf{OL(\%)}& \textbf{F1} & \textbf{OL(\%)}& \textbf{F1} & \textbf{OL(\%)} \\ \hline
+%       & \multicolumn{2}{c|}{\textbf{ReCon}}& \multicolumn{2}{c|}{\textbf{AntShield}} & \multicolumn{2}{c|}{\textbf{IMDB}}& \multicolumn{2}{c|}{\textbf{SMS Spam}}\\ \hline
+%       3.00(2,3)   & 75.30	& 1.44 & 75.03	& 1.39 & 82.24	& 1.56 & 92.21 &	1.15
+% \\
+%       3.17(3,2) &	91.95 & 1.06 & 91.65 &	1.11 & 82.09 &	1.27 & 95.33 &	1.21
+% \\
+%       4.00(2,4) &	80.72 & 86.45 & 77.60	& 87.37 & 81.50	& 86.19 & 90.24	& 83.85
+% \\ \hline
+
+%     \end{tabular}
+
+%     \label{tab:placeholder}
+% \end{table}
+
+% In VQ, overload occurs when the input vector lies outside the fundamental Voronoi region of the lattice, causing the projection to wrap around a distant lattice point. This mismatch introduces a large quantization error, which can propagate through deeper layers and significantly affect model predictions. Table \ref{tab:overload_f1_with_comments} summarizes representative configurations across four datasets, highlighting how overload percentage correlates with accuracy degradation.
+
+% Across all datasets, configurations with low overload (< 1\%) maintain high F1-scores and behave similarly to high-bitwidth or full-precision settings. In contrast, high-overload cases (> 50\%) exhibit a pronounced drop in F1, especially for configurations such as $(2,2)$ or $(2,4)$, where the effective dynamic range is severely constrained. This demonstrates that overload is a primary factor determining whether a quantization configuration is stable or collapses.
+
+
+
+% \begin{table}[]
+%     \centering
+%       \caption{Representative configurations illustrating how overload correlates with F1-score degradation.-- to be changed}
+%     \scriptsize
+%     \begin{tabular}{|p{0.7cm}|p{1cm}|p{0.5cm}|p{0.7cm}|p{1.1cm}| p{0.5cm}|p{0.7cm}|p{0.7cm}|p{0.5cm}|p{0.5cm}|p{1.2cm}|p{0.5cm}|p{0.7cm}|}
+%         \hline
+%         \textbf{Dataset} & \textbf{Bits} & \textbf{F1} &  \textbf{OL(\%)} & 
+%         \textbf{Dataset} & \textbf{F1} & \textbf{OL(\%)} & \textbf{Dataset} & \textbf{F1} & \textbf{OL(\%)} & \textbf{Dataset} & \textbf{F1} & \textbf{OL(\%)}  \\ \hline
+        
+        
+%         \multirow{3}{*}{ReCon} & \textcolor{red}{2.00b(2,2)} &	78.79  &	60.81 & \multirow{3}{*}{AntShield} 	& 78.25	& 60.68 & \multirow{3}{*}{IMDB}  &	83.03 &	61.42 &  \multirow{3}{*}{SMS Spam} & 90.41	& 59.01 \\
+%     & 2.00b(4,1) & 92.87 & 0.02  & & 92.59 & 	0.01  & & 84.05 & 0.02  & & 94.95 & 0.01 \\ \cline{2-4} \cline{6-7} \cline{9-10}\cline{12-13}
+%     & \textcolor{red}{3.00b(2,3)} & 79.56 & 79.14 & & 77.21 &    78.64 & & 83.12	& 79.88 & & 90.10 & 76.70\\
+%     & 3.00b(8,1) & 93.23 & 0.00  & & 92.33 &	0.01  & & 83.12 & 0.00  & &	96.95 &	0.01\\\cline{2-4} \cline{6-7} \cline{9-10}\cline{12-13}
+%     & \textcolor{red}{4.00b(2,4)} & 80.82 & 83.71 & & 79.12 &	84.03 & & 84.03	& 84.97 & & 92.36 & 81.96\\
+%     & 4.00b(4,2) & 93.13 & 0.40  & & 92.83 &	0.35  & & 83.42	& 0.39  & & 94.59 & 0.30\\
+
+
+%  \hline
+%     %   \multirow{3}{*}{IMDB} & 2.00b(2,2)  &	83.03 &	61.42 &  \multirow{3}{*}{SMS Spam} & 90.41	& 59.01 \\
+%     %   & 2.00b(4,1)	& 84.05 	& 0.02  &  & 94.95 	& 0.01 \\
+%     %   & 3.00b(2,3)	& 83.12	& 79.88 & & 90.10	& 76.70 \\
+%     %   & 3.00b(8,1)	& 83.12 &	0.00 & &	96.95 &	0.01\\
+%     % & 4.00b(2,4)	& 84.03	& 84.97 & & 	92.36	& 81.96\\
+%     % & 4.00b(4,2)	& 83.42	& 0.39 & & 94.59 & 0.30 \\ \hline
+%     \end{tabular}
+  
+%     \label{tab:overload_f1_with_comments}
+% \end{table}
+
+
+
+
+% \begin{figure}[H]
+% \centering
+% \begin{tabular}{c c}
+%     \includegraphics[width=0.49\linewidth]{Plots/warmup=0_ReCon.png} &
+%     \includegraphics[width=0.49\linewidth]{Plots/warmup=5_ReCon.png} \\
+%     %\multicolumn{2}{c}{\textbf{(a) Exact vs Babai approximation}} \\
+%     \multicolumn{2}{c}{\includegraphics[width=0.49\linewidth]{Plots/time_difference_recon.png}}\\
+%     % \includegraphics[width=0.49\textwidth]{Plots/ReCon_f1_babai.png} &
+%     % \includegraphics[width=0.49\textwidth]{Plots/ReCon_time_babai.png} \\
+%     % \multicolumn{2}{c}{\textbf{(b) Babai}} \\
+% \end{tabular}
+
+% \caption{Comparison of Quantization Metrics for ReCon Dataset}
+% \label{fig:recon_plots_table}
+% \end{figure}
+
+% \begin{figure}[H]
+% \centering
+% \begin{tabular}{c c}
+%     \includegraphics[width=0.49\textwidth]{Plots/Ants_f1_exact.png} &
+%     \includegraphics[width=0.49\textwidth]{Plots/Ants_time_exact.png} \\
+%     \multicolumn{2}{c}{\textbf{(a) Exact}} \\
+%     \includegraphics[width=0.49\textwidth]{Plots/Ants_f1_babai.png} &
+%     \includegraphics[width=0.49\textwidth]{Plots/Ants_time_babai.png} \\
+%     \multicolumn{2}{c}{\textbf{(b) Babai}} \\
+% \end{tabular}
+
+% \caption{Comparison of Quantization Metrics for AntSheild Dataset}
+% \label{fig:recon_plots_table}
+% \end{figure}
+
+% \begin{figure}[H]
+% \centering
+% \begin{tabular}{c c}
+%     \includegraphics[width=0.7\linewidth, height=0.3\linewidth]{Plots/ReCon_time_analysis.png}\\ 
+%     \includegraphics[width=0.7\linewidth, height=0.3\linewidth]{Plots/Ants_time_analysis.png} \\
+%     \includegraphics[width=0.7\linewidth, height=0.3\linewidth]{Plots/IMDB_time_analysis.png} \\
+%     \includegraphics[width=0.7\linewidth, height=0.3\linewidth]{Plots/SPAM_time_analysis.png} \\
+% \end{tabular}
+% \caption{Comparison of quantization time of FP32 vs VQ}
+% \label{fig:recon_plots_table}
+% \end{figure}
+
+% \begin{figure}[H]
+% \centering
+% \begin{tabular}{c c}
+%     \includegraphics[width=0.7\linewidth, height=0.3\linewidth]{Plots/recon_ptq.png} \\
+%     \includegraphics[width=0.7\linewidth, height=0.3\linewidth]{Plots/ants_ptq.png} \\
+%     \includegraphics[width=0.7\linewidth, height=0.3\linewidth]{Plots/imdb_ptq.png} \\
+%     \includegraphics[width=0.7\linewidth, height=0.3\linewidth]{Plots/spam_ptq.png} \\
+% \end{tabular}
+% \caption{Comparison of PTQ techniques}
+% \label{fig:recon_plots_table}
+% \end{figure}
+
+% \begin{figure}[H]
+% \centering
+% \begin{tabular}{c c}
+%     \includegraphics[width=0.7\linewidth, height=0.3\linewidth]{Plots/VQPlots/Recon_wu0.png} \\
+%     \includegraphics[width=0.7\linewidth, height=0.3\linewidth]{Plots/VQPlots/Recon_wu5.png} \\
+%     \includegraphics[width=0.7\linewidth, height=0.3\linewidth]{Plots/VQPlots/Ants_wu0_VQ.png} \\
+%     \includegraphics[width=0.7\linewidth, height=0.3\linewidth]{Plots/VQPlots/Ants_wu5_VQ.png} \\
+% \end{tabular}
+% \caption{Comparison of VQ techniques -Part 1}
+% \label{fig:recon_plots_table}
+% \end{figure}
+
+% \begin{figure}[H]
+% \centering
+% \begin{tabular}{c c}
+%     \includegraphics[width=0.7\linewidth, height=0.3\linewidth]{Plots/VQPlots/IMDB_wu0_VQ.png} \\
+%     \includegraphics[width=0.7\linewidth, height=0.3\linewidth]{Plots/VQPlots/IMDB_wu5_VQ.png} \\
+%     \includegraphics[width=0.7\linewidth, height=0.3\linewidth]{Plots/VQPlots/SPAM_wu0_VQ.png} \\
+%     \includegraphics[width=0.7\linewidth, height=0.3\linewidth]{Plots/VQPlots/SPAM_wu5_VQ.png} \\
+% \end{tabular}
+% \caption{Comparison of VQ techniques -Part 1}
+% \label{fig:recon_plots_table}
+% \end{figure}
+
+\subsection{BERT quantization}
+We extend our study to linear layers of BERT (in our case 73 layers in bert-base-uncased). In all experiments, we start from the standard pretrained checkpoint and perform end-to-end QAT, rather than training BERT from scratch. This approach is computationally feasible while still allowing the quantizer and model to co-adapt during fine-tuning. We adopt mixed-precision training, meaning attention softmax, layer norms, and non-linearities remain in FP16/FP32, while the linear projections are quantized using VQ.
+
+Table \ref{bert_results_f} reports results for four settings: (i) end-to-end QAT of both BERT and MLP (\textbf{B$^{\text{QE/QB}}$M$^{\text{QE/QB}}$}), 
+(ii) FP32 BERT with PTQ (\textbf{B$^{\text{F}}$M$^{\text{PE/PB}}$}), and (iii) FP32 BERT with QAT MLP (\textbf{B$^{\text{F}}$M$^{\text{QE/QB}}$}). \noindent 
+FP32 BERT with PTQ MLP suffers severe degradation, collapsing to near-random performance on ReCon and AntShield, but catches up at 3 bits for IMDB and SMS Spam datasets. End-to-end QAT significantly mitigates this degradation, and performance recovers substantially across all bit-widths. At 2–3 bits, QAT achieves F1 scores close to FP32 in the majority of datasets, demonstrating that the lattice-based quantizer can be stably integrated into BERT when co-adapted during training. 
+
+If we quantize the entire model end-to-end, it results in a substantial reduction in memory footprint. This trade-off is particularly attractive in practice, as the accuracy drop remains modest relative to the significant compression gains achieved. Since quantization is introduced only during fine-tuning, the approach remains compatible with standard training pipelines and avoids the prohibitive cost of quantization-aware pretraining. Methods such as QLoRA-style quantized pretraining may further improve alignment between the model and the quantizer; is part of future work.
+
+% \begin{table}[]
+%     \centering
+%     \scriptsize
+%     \caption{Old--Comparison of BERT FP32 and quantization performance under 3-bit regime for $\Delta_0=1.5$. Here, $^{\text{P}}$:PTQ, $^{\text{Q}}$:QAT with Exact , $^{\text{FP}}$: FP32.}
+%     \begin{tabular}{|p{1cm}|p{0.9cm}|p{0.5cm}|p{0.7cm}|p{0.7cm}|p{0.7cm}|p{0.7cm}|p{1.1cm}|p{0.7cm}|p{0.7cm}|p{0.7cm}|p{0.7cm}|p{0.7cm}|}\hline
+%       \textbf{Bits}   &  \textbf{Dataset} & \textbf{FP32} & \textbf{Bert}$^{\text{P}}$ \textbf{MLP}$^{\text{QE}}$ & \textbf{Bert}$^{\text{QE}}$ \textbf{MLP}$^{\text{QE}}$ & \textbf{Bert}$^{\text{FP}}$ \textbf{MLP}$^{\text{P}}$ & \textbf{Bert}$^{\text{FP}}$ \textbf{MLP}$^{\text{Q}}$ & \textbf{Dataset} & \textbf{FP32} & Bert$^{\text{P}}$ \textbf{MLP}$^{\text{QE}}$ & \textbf{Bert}$^{\text{QE}}$ \textbf{MLP}$^{\text{QE}}$ & \textbf{Bert}$^{\text{FP}}$ \textbf{MLP}$^{\text{P}}$ & \textbf{Bert}$^{\text{FP}}$ \textbf{MLP}$^{\text{QE}}$\\ \hline
+%         1.00b(2,1) & \multirow{3}{*}{ReCon} &	 	\multirow{3}{*}{93.93}	& 66.92	& 	51.87	& 	8.27& 	69.46	& \multirow{3}{*}{AntShield} & \multirow{3}{*}{93.22} & 0	& 79.74	& 0.97	& 68.04
+% \\
+%         2.00b(4,1) & & & 61.5&	83.22&	46.39&	92.87 & & & 58.26	& 89.19& 	52.18 & 	92.59
+% \\
+%         3.00b(8,1)	& & &	62.46& 	88.44	& 66.12	& 93.23	& & & 60.8& 	91.21	& 56.73	& 92.33
+% \\			\hline
+       
+% 1.00b(2,1) & \multirow{3}{*}{IMDB} & \multirow{3}{*}{85.59} & 28.02	&	82.30 & 31.35	& 67.22 & \multirow{3}{*}{SMS Spam} & \multirow{3}{*}{95.65} & 0	& 0	& 0	& 78.1 \\
+
+% 2.00b(4,1) & & & 59.37	& 84.81 & 83.72	& 84.05 & & & 78.48	& 97.32	& 74.31	& 94.95 \\
+
+% 3.00b(8,1)& & & 63.94	& 87.00 &	83.03& 	83.12& & & 90.2	&97.33&	68.98&	96.95\\ \hline
+
+ 
+%     \end{tabular}
+
+%     \label{tab:bert_results}
+% \end{table}
+% \begin{table}[]
+%     \centering
+%     \tiny
+%     \caption{old---Comparison of BERT FP32 and quantization performance ($\Delta_0$=0.3). Here, $^{\text{PE}}$:PTQ with Exact, $^{\text{PB}}$:PTQ with Babai,  $^{\text{QE}}$:QAT with Exact, $^{\text{QB}}$:QAT with Babai, $^{\text{FP}}$: FP32.}
+%     \label{bert_results}
+%     \begin{tabular}{| p{0.6cm}|p{0.4cm}|p{0.7cm}|p{0.7cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|
+%     p{0.4cm}|p{0.7cm}|p{0.7cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|} \hline
+% Config	&  FP32	& B$^{\text{QE}}$M$^{\text{QE}}$ & B$^{\text{QB}}$M$^{\text{QB}}$	&	B$^{\text{F}}$M$^{\text{PE}}$	&	B$^{\text{F}}$M$^{\text{PB}}$	&	B$^{\text{F}}$M$^{\text{QE}}$	&	B$^{\text{F}}$M$^{\text{QB}}$ &   FP32	& B$^{\text{QE}}$M$^{\text{QE}}$ & B$^{\text{QB}}$M$^{\text{QB}}$	&	B$^{\text{F}}$M$^{\text{PE}}$	&	B$^{\text{F}}$M$^{\text{PB}}$	&	B$^{\text{F}}$M$^{\text{QE}}$	&	B$^{\text{F}}$M$^{\text{QB}}$ \\  \hline
+% & \multicolumn{7}{c|}{ReCon} & \multicolumn{7}{c}{AntShield} \\ \hline
+% 1b(2,1)  &  \multirow{5}{*}{93.93} & 68.02	& 	38.88	& 	0.00	& 	12.91	& 	68.02	& 	70.22 & \multirow{5}{*}{93.22} & 0	&	63.51	&	59.88 & 	29.68	&	0				&	72.72	\\
+% 2b(4,1) & & 68.02	& 	67.32	& 	45.26	& 	16.21	& 	68.02	& 	81.70 &  & 0	&	57.06	&	52.16 & 	21.72	&	0		&	84.86\\
+% 3b(8,1) & &  84.37	& 	68.02	& 	40.42	& 	45.31	& 	87.36	& 	91.43 & & 86.95	&	27.85	&	32.47 & 	24.40	&	87.10	&	91.90\\
+% 4b(16,1) & & 87.21	& 	78.55	& 	57.33	& 	44.28	& 	93.57	& 	92.66 & & 89.96	&	80.34	&	52.69 & 	31.89	&	92.33	&	92.47\\
+% 9b(8,3) & &  88.15	& 	84.6	& 	53.18	& 	52.65	& 	93.42	& 	92.39 & & 91.15	&	85.46	&	60.37 & 	50.97	&	92.42	&	92.38\\ \hline
+% & \multicolumn{7}{c|}{IMDB} & \multicolumn{5}{c|}{SMS Spam} \\ \hline
+% 1b(2,1) &  \multirow{5}{*}{85.59} & 0 	   &    82.35	&	0.00  &	41.94	&   66.71	&	72.39	& \multirow{5}{*}{95.65} &  0		 &  23.05		& 0.00	&	13.61 &		0		&	73.08	\\
+% 2b(4,1) & & 66.67	   &   	66.67	&	31.20 &	62.32	&	66.71	&	83.32	& & 0		 &  7.55		& 0.00	&	75.95 &		0		&	93.65	\\
+% 3b(8,1) & & 79.85	   &   	78.33	&	76.58 &	80.16	&	83.46	&	81.37	& & 98.65	 & 	26.57		& 84.18	&	83.38 &	   94.28	&	94.20	\\
+% 4b(16,1) & &  84.90	   &   	73.50	&	85.11 &	84.51	&	82.95	&	82.28	& & 97.26	 & 	94.59		& 72.68	&	73.82 &	   96.27	&	96.32	\\
+% 9b(8,3) & & 88.52	   &   	80.68	&	81.54 &	81.15	&	82.49	&	81.48	& & 97.26	 & 	97.33		& 76.80	&	77.49 &	   96.67	&	97.30	\\ \hline
+% \end{tabular}
+% \end{table}
+
+\begin{table}[]
+    \centering
+    \tiny
+    \caption{Comparison of BERT FP32 and quantization performance. Here, $^{\text{PE}}$:PTQ with Exact, $^{\text{PB}}$:PTQ with Babai,  $^{\text{QE}}$:QAT with Exact, $^{\text{QB}}$:QAT with Babai, $^{\text{FP}}$: FP32. For Exact $\Delta_0$=1.5 and for babai $\Delta_0$=0.3. Here, \textit{Config} represent Bert and MLP bits.}
+    \label{bert_results_f}
+    \scalebox{0.9}{
+    \begin{tabular}{| p{0.6cm}|p{0.4cm}|p{0.75cm}|p{0.75cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|p{0.4cm}|p{0.75cm}|p{0.75cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|} \hline
+\textbf{Config}	&  \textbf{FP32}	& \textbf{B$^{\text{QE}}$M$^{\text{QE}}$} & \textbf{B$^{\text{QB}}$M$^{\text{QB}}$}	&	\textbf{B$^{\text{F}}$M$^{\text{PE}}$}	&	\textbf{B$^{\text{F}}$M$^{\text{PB}}$}	&	\textbf{B$^{\text{F}}$M$^{\text{QE}}$}	&	\textbf{B$^{\text{F}}$M$^{\text{QB}}$} &   \textbf{FP32}	& \textbf{B$^{\text{QE}}$M$^{\text{QE}}$} & \textbf{B$^{\text{QB}}$M$^{\text{QB}}$}	&	\textbf{B$^{\text{F}}$M$^{\text{PE}}$}	&	\textbf{B$^{\text{F}}$M$^{\text{PB}}$}	&	\textbf{B$^{\text{F}}$M$^{\text{QE}}$}	&	\textbf{B$^{\text{F}}$M$^{\text{QB}}$} \\  \hline
+\rowcolor{black!20}
+& \multicolumn{7}{c|}{\textbf{ReCon}} & \multicolumn{7}{c|}{\textbf{IMDB}} \\ \hline
+
+1b(2,1)  &  \multirow{3}{*}{93.93}  & 		68.25		& 	38.88	  & 	8.27	     	& 	  12.91	      		& 	69.46	 		   & 	70.22 &  \multirow{3}{*}{85.59}  &   	82.37        &    82.35	  &	    31.35     		&	  41.94	      		&   67.22	    	   &	72.39 \\
+
+2b(4,1)  &                          & 	 85.29       	& 	67.32	  & 	46.39	 		& 	  16.21	      		& 	92.87	 		   & 	81.70  & 							& 		78.54   		&    66.67	  &	    83.72 	 		&	  62.32		  		&	84.05			   &	83.32		\\
+
+3b(8,1)  &                			& 		87.65		& 	68.02	  & 	66.12	 		& 	  45.31	      		& 	93.23	 		   & 	91.43  & 							& 		87.12   		&    78.33	  &	    83.03 			&	  80.16		  		&	83.12			   &	81.37	\\ \hline
+\rowcolor{black!20}
+& \multicolumn{7}{c|}{\textbf{AntShield}} & \multicolumn{7}{c|}{\textbf{SMS Spam}} \\ \hline
+1b(2,1) 		& \multirow{3}{*}{93.22} 	& 	71.33			&	63.51	  &	0.97 		 		& 	  29.68		  		&	68.04				   &	72.72	& \multirow{3}{*}{95.65} 	& 		0 		&  23.05	  & 0.00		 		&	13.61 		  		&		78.10			   &	73.08	\\
+
+2b(4,1)		&  							& 	89.17			&	57.06	  &	52.18 		 		& 	  21.72		  		&	92.59				   &	84.86 & 							& 		96.05 		&  7.55		  & 74.31	     		&	75.95 		  		&		94.95			   &	93.65	\\
+
+3b(8,1)		& 							& 		90.95		&	27.85	  &	56.73 		 		&    24.40		  		&	92.33			   &	91.90 & 							& 		 98.65		&  26.57	  & 68.98	     		&	83.38 		  		&	    96.95		   &	94.20	\\ \hline
+\end{tabular}}
+\end{table}
+
+
+
+
+
+\section{Conclusion}
+
+This work studied lattice-based VQ as a mechanism for enabling stable QAT at extremely low bit-widths. Across both PTQ and QAT settings, our results demonstrate that structured lattice projections offer a decisive advantage over SQ when operating under aggressive compression.
+In particular, our experiments show that $<$2 bits, lattice-based VQ is the only approach that consistently trains successfully and preserves meaningful task performance. In this regime, SQ and existing PTQ methods frequently collapse or exhibit severe instability, whereas lattice-based QAT remains robust. This advantage arises from exploiting geometric structure across weight blocks, which enables more efficient use of the limited bit budget and substantially reduces overload.
+We further demonstrate that quantization behavior is governed not only by nominal bit-width but by lattice parameters, including the choice of (q, M), base scale $\Delta_0$, and decoding strategy. These parameters directly control overload frequency and effective dynamic range, providing practitioners with explicit levers to balance accuracy, compression, and compute. When overload is kept negligible, the fused lattice projection effectively collapses to a single nearest-lattice operation, and hierarchical refinement can be omitted without loss of fidelity.
+{We also explored several extensions to assess the generality of the proposed framework, including exploring $D_4$ lattice in addition to $E_8$, preliminary studies on activation quantization, and evaluations on a multi-class classification dataset. While these results are encouraging, they are not exhaustive and are therefore reported in the \textit{Appendix}.}
+
+Finally, we show that lattice-based QAT extends beyond small models and can be applied to transformers such as BERT, where direct PTQ at very low precision is highly unstable. End-to-end QAT enables substantial recovery of accuracy with controlled degradation, making lattice-based VQ a practical and scalable tool for deploying deep learning models at extremely low precision. 
+
+% \noindent \textbf{Limitations and Future Scope.} 
+% Our approach has several limitations. First, the evaluation is restricted to four binary text-classification datasets, and broader studies across regression, multi-class, and other modalities are needed to validate generalizability. Second, we focus primarily on weight quantization: activations, attention softmax, layer norms, and other BERT submodules remain in full precision, leaving substantial headroom for further compression. Third, the current implementation is not optimized for speed; several components, including fused kernels, projections, and scaling updates, are written in Python and lack low-level CUDA or Triton acceleration. Finally, although the method is compatible with LUT–based decoding for fast inference, LUT support is not yet implemented.
+\noindent \textbf{Limitations and Future Scope.} 
+{Despite encouraging results, several limitations remain. The proposed lattice-based VQ framework is not well suited to PTQ-only scenarios, where methods such as QUIP and QUIP\# are more appropriate. Broader validation across larger benchmarks (e.g., MMLU), regression tasks, and additional modalities is required to more comprehensively assess generality. Moreover, aggressive joint quantization, particularly combinations of low weight and low activation precision, exhibits instability and warrants deeper analysis. Several BERT components, including attention softmax, LayerNorm, and embedding layers, are currently kept in full precision, leaving further opportunities for end-to-end compression. In addition, the current implementation focused on correctness over efficiency, and the investigation prioritized scientific inquiry over performance engineering; key components such as lattice operations and LUT-based support remain unaddressed as a result. }
+% implemented in . Finally, although the framework is compatible with LUT-based decoding for fast inference, LUT support has not yet been implemented.}
+
+
+% \subsection{Citations}
+% \label{others}
+
+% For a citation, use \verb+\cite+, e.g.,~\cite{ma2022principles}.
+% For a textual citation, use \verb+\citet+, e.g.,~\citet{ma2022principles}.  \emph{Any choice} of citation style is allowed as long as it is used consistently throughout the whole paper. The template already loads the \verb+natbib+ package and sets \verb+unsrtnat+ bibliography style. These can be modified for other options.
+
+
+% In the submission version, authors should refer to their own work in the third person for blind review.
+% In particular, avoid phrases that may reveal personal identities (e.g., ``in our earlier work~\cite{ma2022principles}, we have shown ...''). 
+
+
+
+
+\bibliography{reference}
+
+\section{LLM usage}   
+LLMs were used as co-pilots during various stages of this work, including code generation, improving the clarity of the write-up, and assisting in the development and refinement of theoretical ideas. These tools supported the research process but did not replace the authors' own technical contributions or judgment. The authors take full responsibility for the accuracy, correctness, and originality of all content in this paper.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\appendix
+\section{Appendix} 
+
+\begin{algorithm}[]
+\caption{Nearest-neighbor projection $ Q_{\mathrm{E8}}\bigl(
+    \cdot
+  \bigr)$}
+  \scriptsize
+\setcounter{AlgoLine}{0}
+\label{qe8}
+\DontPrintSemicolon
+\KwIn{$x\in\mathbb{R}^8$ (or batch $x\in\mathbb{R}^{B\times 8}$)}
+\KwOut{$y\in E_8$}
+
+\nl Let $\mathbf{h}=(\tfrac12,\dots,\tfrac12)$.\;
+
+\nl $f \leftarrow \mathrm{custom\_round}(x)$;\;
+$y_0 \leftarrow \begin{cases}
+f, & \text{if } (\sum_i f_i)\bmod 2 = 0\\
+g(x), & \text{otherwise}
+\end{cases}$\;
+
+\nl $f' \leftarrow \mathrm{custom\_round}(x-\mathbf{h})$;\;
+$y_1 \leftarrow \begin{cases}
+f'+\mathbf{h}, & \text{if } (\sum_i f'_i)\bmod 2 = 0\\
+g(x-\mathbf{h})+\mathbf{h}, & \text{otherwise}
+\end{cases}$\;
+
+\nl \Return $y = \arg\min\{\|x-y_0\|_2,\ \|x-y_1\|_2\}$.\;
+
+\vspace{2pt}
+\hrule
+\vspace{2pt}
+
+\nl \textbf{Helper-1:} $\mathrm{custom\_round}(\cdot)$ defined as
+$\mathrm{custom\_round}(v)=\lfloor v-\operatorname{sign}(v)\varepsilon+\tfrac12\rfloor$,
+where $\varepsilon>0$ is a tiny constant.
+
+\nl \textbf{Helper-2:} Let $f(x)=\mathrm{custom\_round}(x)$ and
+$k=\arg\max_j |x_j-f(x)_j|$.
+Then $g(x)$ equals $f(x)$ except at coordinate $k$, which is changed by $\pm1$,
+so that the parity of $\sum_i f(x)_i$ flips and ties are resolved consistently.\;
+\end{algorithm}
+\begin{algorithm}
+\caption{Babai projection onto $E_8$}
+\setcounter{AlgoLine}{0}
+\scriptsize
+\label{alg:e8-babai}
+\DontPrintSemicolon
+\KwIn{
+  generator matrix $G \in \mathbb{R}^{8\times 8}$, inverse $G^{-1}$;
+  input $x \in \mathbb{R}^8$ (or batch $x\in\mathbb{R}^{B\times 8}$).
+}
+\KwOut{$\tilde{y} \approx \Pi_{E_8}(x)$.}
+
+\nl Lattice coordinates $z \gets x (G^{-1})^\top$.
+
+\nl Integer rounding $\hat{z} \gets \operatorname{round}(z)$. \tcp*[r]{standard rounding}
+\nl Map back to $\mathbb{R}^8$ $\tilde{y} \gets \hat{z} G^\top$.
+\end{algorithm}
+
+\begin{algorithm}[]
+\caption{Scalar quantization $ Q_{\mathrm{SQ}}\bigl(
+    \cdot
+  \bigr)$}
+\label{alg:lsq-scalar-short}
+\setcounter{AlgoLine}{0}
+\scriptsize
+\DontPrintSemicolon
+\KwIn{
+  pre-scaled tensor $x$; radix $q$; levels $M$.
+}
+\KwOut{$x_{\mathrm{q}}$ (quantized tensor).}
+
+\nl Effective bit-width $b = \big\lfloor M \log_2(q) \big\rfloor$.
+
+\nl Integer limits $q_{\max} = 2^{b-1}-1,\qquad 
+  q_{\min} = -q_{\max}$.
+
+\nl  Round and clip. $
+  x_{\mathrm{q}} = \operatorname{clip}\!\bigl(
+      \operatorname{round}(x),\;
+      q_{\min}, q_{\max}
+  \bigr).
+$
+\end{algorithm}
+\begin{algorithm}[]
+\caption{Overload detection via hierarchical $E_8$ encoding}
+\label{alg:overload-detection}
+\setcounter{AlgoLine}{0}
+\scriptsize
+\DontPrintSemicolon
+\KwIn{
+  quantized blocks from vector quantization
+  $\widehat{\mathbf{W}}^{\mathrm{blocks}} \in \mathbb{R}^{N \times 8}$ 
+  (Step~5 of Alg.~\ref{alg:fused-e8-hnlq});\\
+  radix $q \in \mathbb{N}$, levels $M \in \mathbb{N}$;\\
+  (optional) scale $\beta > 0$ used in the encoder; overload tolerance $\varepsilon > 0$.
+}
+\KwOut{
+  number of overloaded blocks $N_{\mathrm{over}}$ and overload flags
+  $o_k \in \{0,1\}$ for $k=1,\dots,N$.
+}
+
+\nl Block indexing
+  $
+  \widehat{\mathbf{W}}^{\mathrm{blocks}}
+  =
+  \begin{bmatrix}
+    \big(\widehat{\mathbf{w}}^{(1)}\big)^\top\\[-2pt]
+    \vdots\\[-2pt]
+    \big(\widehat{\mathbf{w}}^{(N)}\big)^\top
+  \end{bmatrix},
+  \qquad
+  \widehat{\mathbf{w}}^{(k)} \in \mathbb{R}^{8}.
+  $
+  
+\nl \For{$k = 1,\dots,N$}{
+  
+  $\mathbf{x}^{(k)}_0 \gets \widehat{\mathbf{w}}^{(k)} / \beta$ \tcp*[r]{Match encoder input scaling}
+  
+  \For{$m = 1$ \KwTo $M$}{
+    $\mathbf{u}^{(k)}_m \gets Q_{\mathrm{E8}}\bigl(\mathbf{x}^{(k)}_{m-1}\bigr)$  \tcp*[r]{Nearest $E_8$ lattice point}
+    
+    $\mathbf{z}^{(k)}_m \gets \operatorname{encode\_coords}\bigl(\mathbf{u}^{(k)}_m, q\bigr)$ \tcp*[r]{Lattice coords (base-$q$ digits)}
+    
+    $\mathbf{b}^{(k)}_m \gets \mathbf{z}^{(k)}_m \bmod q$ \tcp*[r]{Stored base-$q$ digits in $[0,q-1]^8$}
+    
+    $\mathbf{x}^{(k)}_m \gets \mathbf{u}^{(k)}_m / q$ \tcp*[r]{Hierarchical state for next level}
+  }
+  
+  $\mathbf{r}^{(k)} \gets Q_{\mathrm{E8}}\bigl(\mathbf{x}^{(k)}_M\bigr)$ \tcp*[r]{Residual after $M$ levels}
+  
+  $
+    o_k \gets
+    \mathbf{1}\!\left[
+      \bigl\|\mathbf{r}^{(k)}\bigr\|_2 > \varepsilon
+    \right]
+  $   \tcp*[r]{Overload if final residual is non-zero}
+}
+
+$N_{\mathrm{over}} \;\gets\; \sum_{k=1}^{N} o_k$ \tcp*[r]{Aggregate overload statistics}
+\end{algorithm}
+\subsection{Nearest-neighbor projection and scalar quantization}
+The exact nearest-neighbor projection onto the $E_8$ lattice (Algorithm~\ref{qe8}) is computed by explicitly evaluating candidates from its two structured cosets, $D_8$ and $D_8+(0.5)^8$. For each coset, a rounded candidate is constructed and corrected to satisfy the even-parity constraint via a minimal coordinate adjustment, and the candidate with the smallest Euclidean distance to the input is selected, guaranteeing the true nearest lattice point. 
+As a lower-complexity alternative, we also consider the Babai projection (Algorithm~\ref{alg:e8-babai}), which operates in the coordinate system induced by a non-orthogonal generator matrix, applies integer rounding in that basis, and maps back to $\mathbb{R}^8$. 
+
+\textit{Note:} Exact and Babai quantization techniques rely on two fundamentally different mechanisms.
+Exact searches over the two structured cosets of $E_8$ ($D_8$ and $D_8 + (0.5)^8$) guarantee the true nearest lattice point for $E_8$. Babai instead works in the coordinate system of a non-orthogonal generator matrix $G$ and applies the nearest-plane rule. Because $G$ is not orthogonal, Babai’s decision regions do not match the true Voronoi regions of $E_8$, so it provides a faster but approximate alternative. It can be considered a different quantizer altogether. When $G$ is orthogonal, and no overloading occurs, both Exact and Babai are equivalent.
+
+
+Algorithm~\ref{alg:lsq-scalar-short} describes SQ, which can be viewed as a special case of VQ operating independently on each coordinate. Given a radix $q$ and $M$ hierarchical levels, the effective bit-width is $b=\lfloor M\log_2(q)\rfloor$, and quantization is performed by element-wise rounding followed by clipping to the representable integer range. Unlike lattice-based VQ, SQ does not exploit inter-dimensional structure, but it provides a useful baseline for isolating the gains from structured VQ.
+
+
+\subsection{Overload detection}
+To detect overload, we apply the hierarchical $E_8$ encoder to the quantized blocks $\widehat{\mathbf{W}}^{\mathrm{blocks}}$. Each block is recursively projected and rescaled across $M$ levels, producing a final residual vector. If this residual is non-zero (or exceeds a small tolerance), the block is marked as overloaded, indicating that its magnitude exceeds the dynamic range supported by $(q,M)$. Algorithm~\ref{alg:overload-detection} summarizes this process and returns both per-block overload flags and aggregate overload statistics. This post-hoc overload analysis is used only for evaluation and characterization; it does not affect forward or backward passes during training.
+
+
+
+\subsection{Heuristics for dynamic range of quantizer:}
+\label{theorem}
+Let $L \subset \mathbb{R}^d$ be a full-rank lattice and consider a hierarchical
+nested lattice quantizer (HNLQ) with radix $q \ge 2$, $M$ digit levels, and
+finest step size $\Delta_0 > 0$. Each scalar codeword generated by the HNLQ
+can be written as $  y_{\mathrm{code}}
+  \;=\;
+  \Delta_0 \sum_{m=0}^{M-1} d_m q^m,
+  \qquad d_m \in \mathcal{D}$, 
+where $\mathcal{D}$ is a finite digit set. If the digits are chosen so that the scalar hierarchy covers a symmetric interval around zero, then the effective representable range can be approximated as
+$ y_{\mathrm{code}} \in [-Y_{\max}, Y_{\max}],
+  \qquad
+  Y_{\max}
+  \;\approx\;
+  \frac{\Delta_0}{2}\bigl(q^{M} - 1\bigr)$.
+
+
+\subsection{Experimental Details}
+For all the results, we use four datasets: i) ReCon \cite{recon}, ii) AntShield \cite{antsh}, iii) IMDB, and iv) SMS Spam. We construct 80/10/10 train/validation/test splits with stratification over the binary label.
+\subsubsection{Experimental Setup}
+We evaluate our unified quantization framework on two architectures: MLP and BERT.
+
+\textbf{MLP pipeline:}
+\label{mlp_pipeline}
+We first extract fixed full-precision (FP32) sentence embeddings using the pretrained \texttt{bert-base-uncased} encoder and then train a shallow quantized MLP on top of these 768-dimensional embeddings. The MLP consists of a mean-centering layer, a fully connected layer with 512 hidden units followed by a ReLU activation, and a final linear layer that outputs a single logit for binary classification. Only the MLP weights are quantized by replacing the first fully connected linear layer with a quantized version using the fused setup explained in Section \ref{E8approach}; the BERT encoder remains frozen in FP32 throughout.
+
+We train the MLP with the Adam optimizer (learning rate $10^{-3}$), batch size 64, and binary cross-entropy with logits loss. The model is trained for up to 200 epochs. This simple architecture isolates the effect of lattice-based quantization on the classifier while keeping the upstream BERT representations fixed.
+
+ \textbf{BERT end-to-end pipeline.}
+We start from the pretrained \texttt{bert-base-uncased} encoder and attach the same shallow MLP head used in above pipeline. All \texttt{nn.Linear} layers inside BERT and in the MLP head are replaced with our fused setup explained in Section \ref{E8approach}.
+
+Input texts are tokenized with a maximum sequence length of 128. The entire model (quantized BERT encoder plus MLP head) is trained end-to-end using AdamW with a learning rate of $2\times 10^{-5}$, a batch size of 32, and a binary cross-entropy with logits loss. We train for up to 25 epochs, selecting the best checkpoint according to validation F1. This setting directly tests whether lattice-based VQ can be pushed into all linear layers of a transformer while preserving downstream binary classification performance.
+
+\subsubsection{Integration into the Quantization Pipeline}
+\label{sec:qat-integration}
+The proposed scalar and vector quantizers are integrated into the MLP classifier and BERT through a fused quantized linear operator. 
+Each fully connected layer $\mathrm{FC}(x) = W x + b$
+is replaced by a quantized operator $
+\mathrm{FC}_{\mathrm{Q}}(x) = \widehat{W}\, x + b
+$ where $\widehat{W}$ is obtained using either fused $E_8$ VQ 
+(Algorithm~\ref{alg:fused-e8-hnlq}) or SQ
+(Algorithm~\ref{alg:fused-sq-hnlq}).  
+In both PTQ and QAT settings, only the weights are quantized.
+
+\noindent In \textbf{PTQ setting}, $\widehat{W}$ is computed once using the learned full-precision weights, and the network is evaluated without any further training. Dynamic ranges are estimated from the trained model, and no gradient updates are involved. Whereas in \textbf{QAT setting}, quantization is applied on every forward pass. The network uses $\widehat{W}$ for inference, but gradients are applied to the underlying full-precision parameters $W$ through STE. 
+
+In VQ, the fused implementation ensures that scaling, block partitioning, projection, reconstruction, and clipping occur within a single differentiable operator, improving numerical stability and reducing memory transfers during training.
+
+\subsubsection{Hyperparameter Choice}
+
+Lattice quantizer is controlled by the hierarchical parameters $(q,M)$, the base radius $\Delta_0$, and the row-safety constant $C_b$. As discussed in Section \ref{E8approach}, $(q,M)$ determine the effective representable radius $Y_{\max} = \Delta_0 (q^M - 1)/2$ and hence the nominal bit budget. In practice, $\Delta_0$ and $C_b$ act as coarse and fine controls on how aggressively each row is scaled before $E_8$ projection. Row-safety constant is fixed to $C_b = 5$, which roughly corresponds to mapping weights into a $5\sigma$ range per row. This choice limits overload events while avoiding overly conservative scaling. The base radius $\Delta_0$ is set to 1.5 and 0.3.
+
+
+\subsubsection{Additional Experimental Results}
+\noindent \textbf{a) PTQ vs. QAT.}
+Table~\ref{ptqvsQAT} presents a comparison across 1–12 bits, while Table~\ref{SQVQ-2} reports fractional bit-width results for VQ variants. At $\geq$4 bits, the performance gap between QAT and PTQ narrows. QuIP is strongest in most configurations on IMDB and ReCon, while Brevitas remains competitive on ReCon, AntShield, and SMS Spam. In contrast, at ultra-low precision (1 and 1.5 bits), PTQ methods either fail or degrade significantly across datasets, whereas our lattice-based VQ-QAT variants consistently achieve strong and stable performance, establishing them as the most effective approach in this regime.
+
+\begin{table}[]
+    \centering
+    \tiny
+    \caption{PTQ vs. QAT ($\Delta_0=1.5$ for all settings and 0.3 for Babai PTQ). For each bit-width, we use the nearest $(q,M)$ setting and report the best score when multiple configurations match the bit budget.}
+    \label{ptqvsQAT}
+    \begin{tabular}{| p{0.5cm}|p{0.6cm}|p{0.7cm}|p{0.7cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|p{0.7cm}|p{0.7cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|} \hline
+M-Bit(s) & \multicolumn{3}{|c}{\textbf{QAT}} & \multicolumn{4}{|c}{\textbf{PTQ}} & \multicolumn{3}{|c}{\textbf{QAT}} & \multicolumn{4}{|c|}{\textbf{PTQ}} \\ \cline{2-15}
+& \textbf{Brevitas} & \textbf{VQ-E} &\textbf{ VQ-B} & \textbf{Brevitas} & \textbf{VQ-E} & \textbf{VQ-B} &\textbf{ QuIP} & \textbf{Brevitas} & \textbf{VQ-}E & \textbf{VQ-B} & \textbf{Brevitas} & \textbf{VQ-E} & \textbf{VQ-B} &\textbf{ QuIP}  \\ \hline
+\rowcolor{black!20}
+& \multicolumn{7}{c|}{\textbf{ReCon}} &  \multicolumn{7}{|c|}{\textbf{IMDB}}\\ \hline
+1    & 	Error &	69.46&	\textbf{87.92}& Error   & 8.27 & 12.91 & 57.03 & Error	& 67.22&	\textbf{80.60}&	Error &	31.35&	41.94&	79.11 \\
+2 	& 	92.19&	\textbf{92.87}&	92.30&32.08   &  46.39 & 16.21 & 87.91 & 84.75&	84.05&	82.28&	63.06&	83.72&	63.46&	\textbf{85.88} \\
+3 	 & 	\textbf{93.38}&	93.23&	93.13&48.42   & 66.12 & 45.31 & 92.24 & 85.49&	83.12&	82.73&	82.19&	83.03&	80.16&	\textbf{85.93} \\
+4 	&	92.95 &	\textbf{93.13}&	92.22&90.90   & 65.25 &  56.50 & 92.89 & 85.14&	84.03&	82.03&	84.89&	82.75&	84.81&	\textbf{85.63} \\
+5 	&	93.32&	93.54&	90.47&92.58   & 59.40 & 52.09 & \textbf{93.67} & 85.10&	82.83&	81.27&	85.61&	83.84&	83.43&	\textbf{85.53} \\
+6 	&	\textbf{94.32}&	93.46&	92.65&93.90   & 69.42 & 71.01 & 94.16 & 85.47&	83.06&	83.08&	85.76&	82.76&	83.47&	\textbf{85.59} \\
+7 	&	93.20&	92.71&	91.11&93.56   & 53.06 & 59.16 & \textbf{93.95} & 85.40&	83.12&	80.64&	85.38&	83.40&	83.91&	\textbf{85.57} \\
+8 	&	92.37&	93.23&	92.83&\textbf{93.99}   & 64.27 & 64.85 & 93.93 & 84.77&	83.82&	83.32&	85.54&	78.32&	82.76&	\textbf{85.64} \\
+9 	&	\textbf{93.96}&	93.23&	91.92&93.84   & 60.45 & 52.65 & \textbf{93.96} & 85.53&	82.14&	81.22&	\textbf{85.57}&	84.00&	81.15&	85.54 \\
+10 	&	\textbf{93.91}&	93.22&	91.65&93.86   & 74.80 & 41.45 & \textbf{93.91} & 84.94&	83.16&	81.49&	85.54&	68.67&	85.29&	\textbf{85.59} \\
+11 	&	93.56&	92.99&	91.10&\textbf{93.93}   & 43.38 & 45.97 & 93.91 & 85.34&	82.52&	80.84&	\textbf{85.59}&	84.62&	80.11&	\textbf{85.59} \\
+12 	&	93.82&	93.06&	92.12&93.94   & 41.65 & 58.59 & \textbf{93.96} & 85.34&	81.67&	82.87&	\textbf{85.59}&	80.58&	82.97&	\textbf{85.59} \\ \hline
+    \end{tabular}
+ \begin{tabular}{| p{0.5cm}|p{0.6cm}|p{0.7cm}|p{0.7cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|p{0.7cm}|p{0.7cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|} \hline
+% Bit & \multicolumn{3}{|c}{\textbf{QAT}} & \multicolumn{4}{|c}{\textbf{PTQ}} & \multicolumn{3}{|c}{\textbf{QAT}} & \multicolumn{4}{|c|}{\textbf{PTQ}} \\ \cline{2-15}
+% & \textbf{Brevitas} & \textbf{VQ-E} &\textbf{ VQ-B} & \textbf{Brevitas} & \textbf{VQ-E} & \textbf{VQ-B} &\textbf{ QuIP} & \textbf{Brevitas} & \textbf{VQ-}E & \textbf{VQ-B} & \textbf{Brevitas} & \textbf{VQ-E} & \textbf{VQ-B} &\textbf{ QuIP}  \\ \hline
+\rowcolor{black!20}
+& \multicolumn{7}{c|}{\textbf{AntShield}} &  \multicolumn{7}{|c|}{\textbf{SMS Spam}}\\ \hline
+1	& Error	& 68.04&	\textbf{87.91}&	Error&	0.97&	29.68&	71.74&	Error	& 78.10&	\textbf{90.55}&	Error&	0.00&	13.61&	84.62\\
+2	& 91.67&	\textbf{92.59}&	91.31&	17.45&	52.18&	27.97&	83.28&	\textbf{97.30}&	94.95&	95.95&	0.00&	74.31&	75.95&	96.60\\
+3	& \textbf{92.92}&	92.33&	92.11&	72.79&	56.73&	24.40&	71.75&	96.30&	\textbf{96.95}&	95.62&	96.00&	68.98&	85.30&	95.68\\
+4	& \textbf{93.12}&	92.83&	91.90&	77.88&	52.68&	54.24&	92.34&	96.32&	94.59&	95.21&	\textbf{96.62}&	62.08&	67.42&	96.00\\
+5	& \textbf{93.60}&	92.62&	91.38&	90.90&	61.70&	55.87&	92.80&	\textbf{96.64}&	96.32&	96.27&	96.00&	70.62&	81.99&	96.00\\
+6	& 93.38&	92.22&	92.39&	92.95&	53.27&	53.98&	\textbf{93.42}&	96.64&	\textbf{96.97}&	94.88&	95.97&	78.01&	79.89&	95.97\\
+7	& \textbf{93.38}&	92.73&	90.77&	93.10&	49.13&	44.15&	93.30&	\textbf{96.64}&	96.30&	94.67&	95.65&	69.46&	66.07&	96.00\\
+8	& \textbf{93.51}&	91.96&	91.96&	93.20&	47.22&	59.10&	93.14&	96.64&	\textbf{97.63}&	94.88&	95.65&	73.40&	68.04&	95.65\\
+9	& 93.22&	91.78&	91.77&	93.22&	52.35&	50.97&	\textbf{93.25}&	\textbf{96.64}&	96.60&	94.00&	95.65&	78.84&	77.49&	95.65\\
+10	& \textbf{93.33}&	92.05&	91.02&	93.22&	57.52&	54.24&	93.25&	\textbf{96.64}&	95.65&	93.65&	95.65&	70.28&	75.90&	95.65\\
+11	& \textbf{93.61}&	91.97&	91.11&	93.20&	56.59&	51.27&	93.15&	\textbf{96.32}&	95.68&	93.33&	95.65&	76.68&	82.86&	95.65\\
+12	& 93.02&	92.03&	91.78&	93.20&	56.45&	51.01&	\textbf{93.18}&	\textbf{96.64}&	94.70&	93.24&	95.65&	80.00&	66.82&	95.65\\ \hline
+    \end{tabular}
+    \end{table}
+% \begin{table}[]
+%     \centering
+%     \tiny
+%     \caption{PTQ vs. QAT on AntShield and SMS Spam ($\Delta_0=1.5$ for all settings and 0.3 for Babai PTQ). For each bit-width, we use the nearest $(q,M)$ setting and report the best score when multiple configurations match the bit budget.}
+%     \label{ptqvsQAT-2}
+%     \begin{tabular}{| p{0.2cm}|p{0.4cm}|p{0.7cm}|p{0.7cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|p{0.4cm}|p{0.7cm}|p{0.7cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|} \hline
+% Bit & \multicolumn{3}{|c}{\textbf{QAT}} & \multicolumn{4}{|c}{\textbf{PTQ}} & \multicolumn{3}{|c}{\textbf{QAT}} & \multicolumn{4}{|c|}{\textbf{PTQ}} \\ \cline{2-15}
+% & \textbf{Brevitas} & \textbf{VQ-E} &\textbf{ VQ-B} & \textbf{Brevitas} & \textbf{VQ-E} & \textbf{VQ-B} &\textbf{ QuIP} & \textbf{Brevitas} & \textbf{VQ-}E & \textbf{VQ-B} & \textbf{Brevitas} & \textbf{VQ-E} & \textbf{VQ-B} &\textbf{ QuIP}  \\ \hline
+% & \multicolumn{7}{c|}{\textbf{AntShield}} &  \multicolumn{7}{|c|}{\textbf{SMS Spam}}\\ \hline
+% 1	& Error	& 68.04&	87.91&	Error&	0.97&	29.68&	71.74&	Error	& 78.10&	90.55&	Error&	0.00&	13.61&	84.62\\
+% 2	& 91.67&	92.59&	91.31&	17.45&	52.18&	27.97&	83.28&	97.30&	94.95&	95.95&	0.00&	74.31&	75.95&	96.60\\
+% 3	& 92.92&	92.33&	91.77&	72.79&	56.73&	24.40&	71.75&	96.30&	96.95&	95.62&	96.00&	68.98&	85.30&	95.68\\
+% 4	& 93.12&	92.83&	91.90&	77.88&	52.68&	54.24&	92.34&	96.32&	94.59&	95.21&	96.62&	62.08&	73.82&	96.00\\
+% 5	& 93.60&	92.52&	90.89&	90.90&	38.17&	48.34&	92.80&	96.64&	96.62&	94.00&	96.00&	79.47&	71.01&	96.00\\
+% 6	& 93.38&	92.22&	92.39&	92.95&	53.27&	53.98&	93.42&	96.64&	96.97&	94.88&	95.97&	78.01&	79.89&	95.97\\
+% 7	& 93.38&	92.73&	90.77&	93.10&	49.13&	44.15&	93.30&	96.64&	96.30&	94.67&	95.65&	69.46&	66.07&	96.00\\
+% 8	& 93.51&	91.96&	91.96&	93.20&	47.22&	59.10&	93.14&	96.64&	97.63&	94.88&	95.65&	73.40&	68.04&	95.65\\
+% 9	& 93.22&	91.78&	91.77&	93.22&	52.35&	50.97&	93.25&	96.64&	96.60&	94.00&	95.65&	78.84&	77.49&	95.65\\
+% 10	& 93.33&	92.05&	91.02&	93.22&	57.52&	54.24&	93.25&	96.64&	95.65&	93.65&	95.65&	70.28&	75.90&	95.65\\
+% 11	& 93.61&	91.97&	91.11&	93.20&	56.59&	51.27&	93.15&	96.32&	95.68&	93.33&	95.65&	76.68&	82.86&	95.65\\
+% 12	& 93.02&	92.03&	91.78&	93.20&	56.45&	51.01&	93.18&	96.64&	94.70&	93.24&	95.65&	80.00&	66.82&	95.65\\ \hline
+%     \end{tabular}
+%     \end{table}
+% \begin{figure}[]
+% \centering
+% \begin{tabular}{c c}
+%     \includegraphics[width=0.49\linewidth, height=0.3\linewidth]{Plots/QATvsPTQ/Recon_full.png} &
+%     \includegraphics[width=0.49\linewidth, height=0.3\linewidth]{Plots/QATvsPTQ/Recon_zoomed.png} \\
+%     \includegraphics[width=0.49\linewidth, height=0.3\linewidth]{Plots/QATvsPTQ/Ants_full.png} &
+%     \includegraphics[width=0.49\linewidth, height=0.3\linewidth]{Plots/QATvsPTQ/Ants_zoomed.png} \\
+%         \includegraphics[width=0.49\linewidth, height=0.3\linewidth]{Plots/QATvsPTQ/IMDB_full.png} &
+%     \includegraphics[width=0.49\linewidth, height=0.3\linewidth]{Plots/QATvsPTQ/IMDB_zoomed.png} \\
+%         \includegraphics[width=0.49\linewidth, height=0.3\linewidth]{Plots/QATvsPTQ/SPAM_full.png} &
+%     \includegraphics[width=0.49\linewidth, height=0.3\linewidth]{Plots/QATvsPTQ/SPAM_zoomed.png} \\
+% \end{tabular}
+% \caption{Comparison of PTQ vs QAT (full and zoomed versions) with $\Delta_0$=0.3}
+% \label{delta0.3_qatvsptq}
+% \end{figure}
+
+% \begin{figure}[]
+% \centering
+% \begin{tabular}{c c}
+%     \includegraphics[width=0.49\linewidth, height=0.3\linewidth]{Plots/QATvsPTQ_Final/ReCon_comp_full.png} &
+%     \includegraphics[width=0.49\linewidth, height=0.3\linewidth]{Plots/QATvsPTQ_Final/ReCon_comp_zoomed.png} \\
+%     \multicolumn{2}{c}{(a) ReCon}  \\
+%     \includegraphics[width=0.49\linewidth, height=0.3\linewidth]{Plots/QATvsPTQ_Final/IMDB_comp_full.png} &
+%     \includegraphics[width=0.49\linewidth, height=0.3\linewidth]{Plots/QATvsPTQ_Final/IMDB_comp_zoomed.png} \\
+%      \multicolumn{2}{c}{(b) IMDB}  \\
+%         \includegraphics[width=0.49\linewidth, height=0.3\linewidth]{Plots/QATvsPTQ_Final/Ants_comp_full.png} &
+%     \includegraphics[width=0.49\linewidth, height=0.3\linewidth]{Plots/QATvsPTQ_Final/Ants_comp_zoomed.png} \\
+%      \multicolumn{2}{c}{(c) AntShield}  \\
+%         \includegraphics[width=0.49\linewidth, height=0.3\linewidth]{Plots/QATvsPTQ_Final/SPAM_comp_full.png} &
+%     \includegraphics[width=0.49\linewidth, height=0.3\linewidth]{Plots/QATvsPTQ_Final/SPAM_comp_zoomed.png} \\
+%      \multicolumn{2}{c}{(d) SMS Spam}  \\
+% \end{tabular}
+% \caption{Comparison of PTQ vs QAT (full and zoomed versions on left and right columns respectivelyvely) with $\Delta_0$=1.5.}
+% \label{ptqqatappendix}
+% \end{figure}
+
+\paragraph{b) VQ vs. SQ.}
+Table \ref{SQVQ-2} reports a detailed comparison of SQ and lattice-based VQ across integer and fractional bit-widths. At 1-1.5 bits precision, SQ fails to train on both datasets, whereas VQ remains stable. 
+As bit-width increases beyond 3 bits, the performance gap between SQ and VQ narrows. In Table~\ref{SQVQ-2}, results are summarized by bit-ranges (e.g., 1–1.58,b, 2.x,b, 3.x,b), and for each range we report the best-performing configuration across both SQ and VQ, rather than restricting comparisons to exact integer bit-widths. On ReCon, VQ-Exact achieves the best performance in most configurations, with SQ surpassing VQ only in a few isolated cases. On IMDB, VQ-Exact remains superior across nearly all bit-widths, except for a single configuration around 7.75 bits. In AntShield, SQ begins to outperform VQ at higher precisions ($>8$, bits), while on SMS Spam, this trend appears only beyond 10, bits. Overall, VQ—particularly Exact projection—remains the dominant approach across the majority of datasets and bit-widths.
+
+\begin{table}[]
+    \centering
+        \caption{Comparison of SQ and VQ with $\Delta_0$=1.5.}
+        \label{SQVQ-2}
+    \tiny
+    \begin{tabular}{|p{1.1cm}| 
+    p{0.6cm}| p{0.6cm}| p{0.6cm} |
+    p{0.6cm} |p{0.6cm}| p{0.6cm}| 
+    p{0.6cm}| p{0.6cm} |p{0.6cm} |
+    p{0.6cm}|p{0.6cm}|p{0.6cm}|} \hline
+        \textbf{M-Bit(s)} & 
+        \textbf{SQ} & \multicolumn{2}{c|}{\textbf{VQ-Exact}} & \multicolumn{2}{c|}{\textbf{VQ-Babai}}&
+        \textbf{SQ} & \multicolumn{2}{c|}{\textbf{VQ-Exact}} & \multicolumn{2}{c|}{\textbf{VQ-Babai}}\\
+        
+        \cline{3-6} \cline{8-11} \cline{12-13}
+        & &  \textbf{F1} & \textbf{OL\%} &
+        \textbf{F1} & \textbf{OL\%} & &
+        \textbf{F1} & \textbf{OL\%} & 
+        \textbf{F1} & \textbf{OL\%} \\ \hline
+        \rowcolor{black!20}
+        & \multicolumn{5}{c|}
+        {\textbf{ReCon} (FP-93.93)} & \multicolumn{5}{c|} {\textbf{IMDB} (FP-85.59)}\\ \hline
+
+1.00b(2,1)   & \multirow{2}{*}{Error} &	69.46   & 0.02      &  87.92 &	0 		& \multirow{2}{*}{Error} & 67.22 &	0.00  & 80.60	& 0   \\ 
+1.58b(3,1)   &                        & \textbf{92.87}   & 2.25      &  89.55 &	0 		&                        & \textbf{82.97} &	2.62  & 81.84	& 0   \\ \cline{2-2} \cline{7-7}
+2.00b(2,2)   & \multirow{5}{*}{90.87} &	78.79	& 60.81     &  92.30 &	0 		& \multirow{5}{*}{83.23} & 83.03 &	61.42 & 82.28	& 0   \\
+2.00b(4,1)   &                        &	92.87	& 0.02      &  92.30 &	0 		&                        & \textbf{84.05} &	0.02  & 82.28	& 0   \\
+2.32b(5,1)   &                        &	92.90	& 0.00      &  91.39 &	0 		&                        & 83.19 &	0.01  & 81.93	& 0   \\
+2.58b(6,1)   &                        &	92.93	& 0.01      &  91.81 &	6.98	&                        & 82.59 &	0.01  & 81.28	& 6.60   \\
+2.81b(7,1)   &                        &	\textbf{93.44}	& 0.00      &  91.53 &	0 		&                        & 82.79 &	0.01  & 82.88	& 0   \\ \cline{2-2} \cline{7-7}
+3.00b(2,3)   & \multirow{3}{*}{\textbf{93.49}} &	79.56	& 79.14     &  93.13 &	0 		& \multirow{3}{*}{83.98} & 83.12 &	79.88 & 82.73	& 0   \\
+3.00b(8,1)   &                        &	93.23	& 0.00      &  91.25 &	0 		&                        & 83.12 &	0.00  & 81.92	& 0   \\
+3.17b(3,2)   &                        &	93.24	& 1.00      &  91.72 &	0 		&                        & \textbf{84.43} &	1.28  & 82.55	& 0   \\ \cline{2-2} \cline{7-7}
+4.00b(2,4)   & \multirow{5}{*}{92.84} &	80.82	& 83.71     &  92.22 &	0 		& \multirow{5}{*}{83.86} & 84.03 &	\textbf{84.97} & 82.03	& 0   \\
+4.00b(4,2)   &                        &	\textbf{93.13}	& 0.40      &  92.22 &	0 		&                        & 83.42 &	0.39  & 82.03	& 0   \\
+% 4.00b(16,1)&                        & 92.61   & 0.01      &  91.57 &	0 		&                        & 83.40 &   0.01 & 82.51	& 0   \\ 
+4.64b(5,2)   &                        &	92.94	& 0.20      &  91.50 &	0 		&                        & 82.14 &	0.24  & 81.36	& 0   \\
+4.75b(3,3)   &                        &	92.54	& 3.52      &  90.80 &	0 		&                        & 82.92 &	4.46  & 81.55	& 0   \\ \cline{2-2} \cline{7-7}
+5.17b(6,2)   & \multirow{2}{*}{93.05} &	\textbf{93.54}	& 0.19      &  90.47 &	7.62 	& \multirow{2}{*}{82.79} & \textbf{82.83} &	0.22  & 81.27	& 7.58   \\
+% 5.61b(7,2)   &                        &	92.88	& 0.17      &  90.10 &	0 		&                        & 82.49 &	0.20  & 82.04	& 0   \\ 
+5.61b(7,2)   &                        &	92.88	& 0.17      &  90.10 &	0 		&                        & 82.49 &	0.20  & 82.04	& 0   \\ \cline{2-2} \cline{7-7}
+6.00b(4,3)   & \multirow{4}{*}{92.91} &	92.84	& 0.78      &  92.65 &	0 		& \multirow{4}{*}{82.38} & 83.06 &	0.78  & 83.08	& 0   \\
+6.00b(8,2)   &                        &	\textbf{93.46}	& 0.08      &  92.48 &	0 		&                        & 82.28 &	0.10  & 82.13	& 0   \\
+6.34b(3,4)   &                        &	93.24	& 5.04      &  90.44 &	0 		&                        & \textbf{83.81} &	6.14  & 81.80	& 0   \\
+6.97b(5,3)   &                        &	92.71	& 0.36      &  91.11 &	0 		&                        & 83.12 &	0.37  & 80.64	& 0   \\ \cline{2-2} \cline{7-7}
+7.75b(6,3)   & \textbf{93.69}                  &	93.29	& 0.36      &  91.93 &	8.08 & \textbf{82.70}                  & 82.68 &	0.34  & 82.21	& 8.06  \\ \cline{2-2} \cline{7-7}
+8.00b(4,4)   & \multirow{2}{*}{93.12} &	\textbf{93.23}	& 0.76      &  92.83 &	0 		& \multirow{2}{*}{83.37} & \textbf{83.82} &	0.80  & 83.32	& 0   \\
+8.42b(7,3)   &                        &	92.67	& 0.26      &  91.19 &	0 		&                        & 81.34 &	0.26  & 81.79	& 0   \\ \cline{2-2} \cline{7-7}
+9.00b(8,3)   & \multirow{2}{*}{93.17} &	93.23	& 0.14      &  91.92 &	0 		& \multirow{2}{*}{82.85} & 82.14 &	0.13  & 81.22	& 0   \\
+9.29b(5,4)   &                        &	\textbf{93.63}	& 0.42      &  90.27 &	0 		&                        & \textbf{83.60} &	0.44  & 81.36	& 0   \\ \cline{2-2} \cline{7-7}
+10.34b(6,4)  & 93.11                  &	\textbf{93.22}   & 0.36      &  91.65 &	8.10	& 81.32                  & \textbf{83.16} &	0.39  & 81.49	& 8.18 \\ \cline{2-2} \cline{7-7}
+11.23b(7,4)  & 92.90                  &	\textbf{92.99}   & 0.27      &  91.10 &	0 		& 82.25                  & \textbf{82.52} &	0.28  & 80.84	& 0   \\ \cline{2-2} \cline{7-7}
+12.00b(8,4)  & \textbf{93.16}                  &	93.06   & 0.13      &  92.12 &	0 		& 82.46                  & 81.67 &	0.13  & \textbf{82.87}	& 0   \\ \hline
+\end{tabular}
+    \begin{tabular}{|p{1.1cm}| 
+    p{0.6cm}| p{0.6cm}| p{0.6cm} |
+    p{0.6cm} |p{0.6cm}| p{0.6cm}| 
+    p{0.6cm}| p{0.6cm} |p{0.6cm} |
+    p{0.6cm}|p{0.6cm}|p{0.6cm}|} \hline
+        % \textbf{Bits} & 
+        % \textbf{SQ} & \multicolumn{2}{c|}{\textbf{VQ-Exact}} & \multicolumn{2}{c|}{\textbf{VQ-Babai}}&
+        % \textbf{SQ} & \multicolumn{2}{c|}{\textbf{VQ-Exact}} & \multicolumn{2}{c|}{\textbf{VQ-Babai}}\\
+        
+        % \cline{3-6} \cline{8-11} \cline{12-13}
+        % & &  \textbf{F1} & \textbf{OL(\%)} &
+        % \textbf{F1} & \textbf{OL(\%)} & &
+        % \textbf{F1} & \textbf{OL(\%)} & 
+        % \textbf{F1} & \textbf{OL(\%)} \\ \hline
+        
+\rowcolor{black!20}
+  & \multicolumn{5}{c|}
+        {\textbf{AntShield}} & \multicolumn{5}{c|} {\textbf{SMS Spam}}\\ \hline
+1.00b(2,1)   & \multirow{2}{*}{Error} & 68.04 & 0.04  & 87.91  &	0      & \multirow{2}{*}{Error} & 78.10 &	0.01	 & 90.55 & 0 \\
+1.58b(3,1)   &                        & \textbf{92.09} & 2.38  & 91.23  &	0      &                        & 93.65 &   2.25	 & \textbf{95.24} & 0 \\  \cline{2-2} \cline{7-7}
+2.00b(2,2)   & \multirow{5}{*}{90.83} & 78.25 &	60.68 & 91.31  &	0      & \multirow{5}{*}{95.59} & 90.41 &	59.01    & 95.95 & 0 \\
+2.00b(4,1)   &                        & 92.59 &	0.01  & 91.31  &	0      &                        & 94.95 &	0.01	 & 95.95 & 0 \\
+2.32b(5,1)   &                        & 92.48 &	0.00  & 90.55  &	0      &                        & 96.00 &	0.01	 & 94.52 & 0 \\
+2.58b(6,1)   &                        & 92.73 &	0.01  & 92.06  &	6.716  &                        & 95.36 &	0.02	 & 95.33 & 6.333 \\
+2.81b(7,1)   &                        & \textbf{92.82} &	0.00  & 91.46  &	0      &                        & \textbf{97.28} &	0.01	 & 95.02 & 0 \\  \cline{2-2} \cline{7-7}
+3.00b(2,3)   & \multirow{3}{*}{91.93} & 77.21 &	78.64 & 92.11  &	0      & \multirow{3}{*}{94.98} & 90.10 &	76.70    & 94.31 & 0 \\
+3.00b(8,1)   &                        & \textbf{92.33} &	0.01  & 91.77  &	0      &                        & \textbf{96.95} &	0.01	 & 95.62 & 0 \\ 
+3.17b(3,2)   &                        & 92.25 &	1.14  & 90.66  &	0      &                        & 96.64 &	1.42	 & 92.51 & 0 \\  \cline{2-2} \cline{7-7}
+4.00b(2,4)   & \multirow{5}{*}{92.51} & 79.12 &	84.03 & 91.90  &	0      & \multirow{5}{*}{95.62} & 92.36 &	81.96    & 95.21 & 0 \\
+4.00b(4,2)   &                        & \textbf{92.83} &	0.35  & 91.90  &	0      &                        & 94.59 &	0.30	 & 95.21 & 0 \\
+% 4.00b(16,1)&                        & 92.59 & 0.00  & 91.73  &	0      &                        & 94.70 &   0.02     & 95.59 & 0 \\
+4.64b(5,2)   &                        & 92.69 &	0.15  & 91.40  &	0      &                        & \textbf{96.64} &	0.25	 & 94.98 & 0 \\
+4.75b(3,3)   &                        & 92.52 &	3.42  & 90.89  &	0      &                        & 96.62 &	4.49	 & 94.00 & 0 \\  \cline{2-2} \cline{7-7}
+5.17b(6,2)   & \multirow{2}{*}{\textbf{92.62}} & \textbf{92.62} &	0.19  & 91.38  &	7.741  & \multirow{2}{*}{94.39} & \textbf{96.32} &	0.23	 & 96.27 & 7.467 \\
+5.61b(7,2)   &                        & 92.12 &	0.16  & 90.88  &	0      &                        & 94.43 &	0.18	 & 93.02 & 0 \\ \cline{2-2} \cline{7-7}
+6.00b(4,3)   & \multirow{4}{*}{92.62} & 92.22 &	0.67  & 92.39  &	0      & \multirow{4}{*}{96}    & 96.30 &	0.70	 & 92.31 & 0 \\
+6.00b(8,2)   &                        & 92.10 &	0.08  & 91.36  &	0      &                        & \textbf{96.97} &	0.10	 & 94.88 & 0 \\ 
+6.34b(3,4)   &                        & 92.29 &	4.71  & 90.33  &	0      &                        & 96.93 &	6.32	 & 93.11 & 0 \\
+6.97b(5,3)   &                        & \textbf{92.73} &	0.42  & 90.77  &	0      &                        & 96.30 &	0.46	 & 94.67 & 0 \\ \cline{2-2} \cline{7-7}
+7.75b(6,3)   & 92.27                  & \textbf{92.45} &	0.35  & 91.24  &	8.134  & 95.33                  & \textbf{95.97} &	0.39	 & 94.31 & 7.642 \\ \cline{2-2} \cline{7-7}
+8.00b(4,4)   & \multirow{2}{*}{\textbf{92.54}} & 91.96 &	0.78  & 91.96  &	0      & \multirow{2}{*}{95.30} & \textbf{97.63} &	0.81	 & 94.88 & 0 \\
+8.42b(7,3)   &                        & 92.51 &	0.24  & 90.89  &	0      &                        & 95.97 &	0.25	 & 93.07 & 0 \\ \cline{2-2} \cline{7-7}
+9.00b(8,3)   & \multirow{2}{*}{\textbf{91.98}} & 91.78 &	0.13  & 91.77  &	0      & \multirow{2}{*}{95.33} & \textbf{96.60} &	0.12	 & 94.00 & 0 \\
+\textbf{}9.29b(5,4)   &                        & 92.51 &	0.43  & 91.67  &	0      &                        & 95.68 &	0.48	 & 92.93 & 0 \\ \cline{2-2} \cline{7-7}
+10.34b(6,4)  & \textbf{92.29}                  & 92.05 &	0.34  & 91.02  &	8.331  & \textbf{96.30}                  & 95.65 &	0.41	 & 93.65 & 7.678 \\ \cline{2-2} \cline{7-7}
+11.23b(7,4)  & \textbf{92.13}                  & 91.97 &	0.24  & 91.11  &	0      & \textbf{96.32}                  & 95.68 &	0.28	 & 93.33 & 0 \\ \cline{2-2} \cline{7-7}
+12.00b(8,4)  & \textbf{92.29}                  & 92.03 &	0.12  & 91.78  &	0      & \textbf{95.97}                  & 94.70 &	0.13	 & 93.24 & 0 \\ \hline
+
+\end{tabular}
+\end{table}
+
+
+% \begin{table}[]
+%     \centering
+%         \caption{Comparison of SQ and VQ across different bitwidths and datasets. $\Delta_0$=1.5 for Exact and 1.5 for Babai.}
+%         \label{SQVQ-2}
+%     \scriptsize
+%     \begin{tabular}{|p{1.1cm}| 
+%     p{0.6cm}| p{0.6cm}| p{0.6cm} |
+%     p{0.6cm} |p{0.6cm}| p{0.6cm}| 
+%     p{0.6cm}| p{0.6cm} |p{0.6cm} |
+%     p{0.6cm}|p{0.6cm}|p{0.6cm}|} \hline
+%         \textbf{Bits} & 
+%         \textbf{SQ} & \multicolumn{2}{c|}{\textbf{VQ-Exact}} & \multicolumn{2}{c|}{\textbf{VQ-Babai}}&
+%         \textbf{SQ} & \multicolumn{2}{c|}{\textbf{VQ-Exact}} & \multicolumn{2}{c|}{\textbf{VQ-Babai}}\\
+        
+%         \cline{3-6} \cline{8-11} \cline{12-13}
+%         & &  \textbf{F1} & \textbf{OL(\%)} &
+%         \textbf{F1} & \textbf{OL(\%)} & &
+%         \textbf{F1} & \textbf{OL(\%)} & 
+%         \textbf{F1} & \textbf{OL(\%)} \\ \hline
+        
+
+%   & \multicolumn{5}{c|}
+%         {\textbf{AntShield}} & \multicolumn{5}{c|} {\textbf{SMS Spam}}\\ \hline
+% 1.00b(2,1)   & \multirow{2}{*}{Error} & 68.04 & 0.04  & 87.91  &	0      & \multirow{2}{*}{Error} & 78.10 &	0.01	 & 90.55 & 0 \\
+% 1.58b(3,1)   &                        & \textbf{92.09} & 2.38  & 91.23  &	0      &                        & 93.65 &   2.25	 & \textbf{95.24} & 0 \\  \cline{2-2} \cline{7-7}
+% 2.00b(2,2)   & \multirow{5}{*}{90.83} & 78.25 &	60.68 & 91.31  &	0      & \multirow{5}{*}{95.59} & 90.41 &	59.01    & 95.95 & 0 \\
+% 2.00b(4,1)   &                        & 92.59 &	0.01  & 91.31  &	0      &                        & 94.95 &	0.01	 & 95.95 & 0 \\
+% 2.32b(5,1)   &                        & 92.48 &	0.00  & 90.55  &	0      &                        & 96.00 &	0.01	 & 94.52 & 0 \\
+% 2.58b(6,1)   &                        & 92.73 &	0.01  & 92.06  &	6.716  &                        & 95.36 &	0.02	 & 95.33 & 6.333 \\
+% 2.81b(7,1)   &                        & \textbf{92.82} &	0.00  & 91.46  &	0      &                        & \textbf{97.28} &	0.01	 & 95.02 & 0 \\  \cline{2-2} \cline{7-7}
+% 3.00b(2,3)   & \multirow{3}{*}{91.93} & 77.21 &	78.64 & 92.11  &	0      & \multirow{3}{*}{94.98} & 90.10 &	76.70    & 94.31 & 0 \\
+% 3.00b(8,1)   &                        & \textbf{92.33} &	0.01  & 91.77  &	0      &                        & \textbf{96.95} &	0.01	 & 95.62 & 0 \\ 
+% 3.17b(3,2)   &                        & 92.25 &	1.14  & 90.66  &	0      &                        & 96.64 &	1.42	 & 92.51 & 0 \\  \cline{2-2} \cline{7-7}
+% 4.00b(2,4)   & \multirow{5}{*}{92.51} & 79.12 &	84.03 & 91.90  &	0      & \multirow{5}{*}{95.62} & 92.36 &	81.96    & 95.21 & 0 \\
+% 4.00b(4,2)   &                        & \textbf{92.83} &	0.35  & 91.90  &	0      &                        & 94.59 &	0.30	 & 95.21 & 0 \\
+% % 4.00b(16,1)&                        & 92.59 & 0.00  & 91.73  &	0      &                        & 94.70 &   0.02     & 95.59 & 0 \\
+% 4.64b(5,2)   &                        & 92.69 &	0.15  & 91.40  &	0      &                        & \textbf{96.64} &	0.25	 & 94.98 & 0 \\
+% 4.75b(3,3)   &                        & 92.52 &	3.42  & 90.89  &	0      &                        & 96.62 &	4.49	 & 94.00 & 0 \\  \cline{2-2} \cline{7-7}
+% 5.17b(6,2)   & \multirow{2}{*}{\textbf{92.62}} & \textbf{92.62} &	0.19  & 91.38  &	7.741  & \multirow{2}{*}{94.39} & \textbf{96.32} &	0.23	 & 96.27 & 7.467 \\
+% 5.61b(7,2)   &                        & 92.12 &	0.16  & 90.88  &	0      &                        & 94.43 &	0.18	 & 93.02 & 0 \\ \cline{2-2} \cline{7-7}
+% 6.00b(4,3)   & \multirow{4}{*}{92.62} & 92.22 &	0.67  & 92.39  &	0      & \multirow{4}{*}{96}    & 96.30 &	0.70	 & 92.31 & 0 \\
+% 6.00b(8,2)   &                        & 92.10 &	0.08  & 91.36  &	0      &                        & \textbf{96.97} &	0.10	 & 94.88 & 0 \\ 
+% 6.34b(3,4)   &                        & 92.29 &	4.71  & 90.33  &	0      &                        & 96.93 &	6.32	 & 93.11 & 0 \\
+% 6.97b(5,3)   &                        & \textbf{92.73} &	0.42  & 90.77  &	0      &                        & 96.30 &	0.46	 & 94.67 & 0 \\ \cline{2-2} \cline{7-7}
+% 7.75b(6,3)   & 92.27                  & \textbf{92.45} &	0.35  & 91.24  &	8.134  & 95.33                  & \textbf{95.97} &	0.39	 & 94.31 & 7.642 \\ \cline{2-2} \cline{7-7}
+% 8.00b(4,4)   & \multirow{2}{*}{\textbf{92.54}} & 91.96 &	0.78  & 91.96  &	0      & \multirow{2}{*}{95.30} & \textbf{97.63} &	0.81	 & 94.88 & 0 \\
+% 8.42b(7,3)   &                        & 92.51 &	0.24  & 90.89  &	0      &                        & 95.97 &	0.25	 & 93.07 & 0 \\ \cline{2-2} \cline{7-7}
+% 9.00b(8,3)   & \multirow{2}{*}{\textbf{91.98}} & 91.78 &	0.13  & 91.77  &	0      & \multirow{2}{*}{95.33} & \textbf{96.60} &	0.12	 & 94.00 & 0 \\
+% \textbf{}9.29b(5,4)   &                        & 92.51 &	0.43  & 91.67  &	0      &                        & 95.68 &	0.48	 & 92.93 & 0 \\ \cline{2-2} \cline{7-7}
+% 10.34b(6,4)  & \textbf{92.29}                  & 92.05 &	0.34  & 91.02  &	8.331  & \textbf{96.30}                  & 95.65 &	0.41	 & 93.65 & 7.678 \\ \cline{2-2} \cline{7-7}
+% 11.23b(7,4)  & \textbf{92.13}                  & 91.97 &	0.24  & 91.11  &	0      & \textbf{96.32}                  & 95.68 &	0.28	 & 93.33 & 0 \\ \cline{2-2} \cline{7-7}
+% 12.00b(8,4)  & \textbf{92.29}                  & 92.03 &	0.12  & 91.78  &	0      & \textbf{95.97}                  & 94.70 &	0.13	 & 93.24 & 0 \\ \hline
+
+% \end{tabular}
+% \end{table}
+
+\textbf{c) Computational overhead of QAT: }
+To quantify the training-time cost introduced by QAT, we measure the per-epoch wall-clock overhead of our fused QAT relative to a full-precision (FP32) baseline. Figures \ref{fig:recon_plots_table} show results for all four datasets. Across all experiments, VQ incurs additional computation during the forward pass due to block partitioning, scaling, and lattice projection. However, the overhead remains modest at roughly 1.31–1.50× the speed of FP32 for VQ Babai setting but is 4-5× for VQ Exact.
+
+The trend is similar across all datasets, demonstrating that lattice projection dominates the additional cost, while dataset size and model depth have minimal impact. These results show that although QAT with structured VQ introduces measurable overhead, the cost remains practically manageable, especially considering the accuracy gains achieved at low precision.
+
+\begin{figure}[]
+\centering
+\begin{tabular}{c c}
+    \includegraphics[ width=0.49\linewidth, height=0.3\linewidth]{Plots/TimePlots/ReCon_time.png} &
+    \includegraphics[width=0.49\linewidth, height=0.3\linewidth]{Plots/TimePlots/Ants_time.png} \\
+    \includegraphics[width=0.49\linewidth, height=0.3\linewidth]{Plots/TimePlots/IMDB_time.png} &
+    \includegraphics[width=0.49\linewidth, height=0.3\linewidth]{Plots/TimePlots/SPAM_time.png} \\
+\end{tabular}
+\caption{Comparison of quantization time of FP32 vs VQ for ReCon and AntShield in the first row and IMDB and SMS Spam in the second row, respectively.}
+\label{fig:recon_plots_table}
+\end{figure}
+
+\textbf{d)Effect of warm-up}
+\begin{figure}[]
+\centering
+\begin{tabular}{c c }
+%l b r t
+    \includegraphics[trim={0cm 0cm 19cm 0 cm},clip , width=0.48\linewidth, height=0.20\linewidth]{Plots/Warmup/Nowarmup_effect_q2M3_darker_zoomed.png} & 
+    \includegraphics[trim={0cm 0cm 18.5cm 0 cm},clip , width=0.48\linewidth, height=0.20\linewidth]{Plots/Warmup/warmup_effect_q2M3_darker_zoomed.png} \\
+\end{tabular}
+\caption{Effect of warm-up on the 3.00b(2,3) configuration for ReCon. Left: without warm-up; right: with warm-up.}
+\label{fig:warmup}
+\end{figure}
+
+Since lattice-based PTQ exhibits poor performance at low bit-widths due to the absence of gradient adaptation, we examine whether an initial FP32 warm-up can mitigate this instability. Specifically, the model is first trained in full precision for 5 epochs and then switched to quantized training. As shown in Figure~\ref{fig:warmup}, the transition from FP32 to quantized weights causes a sharp loss spike, as this switch is effectively equivalent to applying PTQ at the transition point—a sudden projection of weights onto the quantization lattice. This PTQ-like shock explains why VQ-PTQ without fine-tuning performs poorly and why QAT is required for recovery.
+
+While QAT follows the warm-up phase gradually stabilizes training and reduces loss. Figure~\ref{fig:warmup} shows that warm-up delays convergence and introduces additional training overhead, without yielding clear accuracy gains. Consequently, although warm-up can partially alleviate PTQ instability, it does not offer a practical advantage, and training directly with low-bit lattice-based QAT from the outset is both simpler and more effective.
+
+\textbf{e) Overload behavior and effect of $\Delta_0$ }
+In hierarchical lattice quantization, $\Delta_{0}$ controls the size of the coarse quantizer and thus directly governs overload. A vector overloads when it falls outside the $\Delta_{0}$-scaled Voronoi cell of the coarse lattice, which triggers additional residual digits through $g_m(x)=q^{-m}\!\left(Q_L^{\circ m}(x)-Q_L^{\circ (m+1)}(x)\right)$, thereby requiring deeper traversal through the $M$-level hierarchy. Thus, overload is simply a signal that the hierarchy must use more digits to represent the vector; it is not an error condition.
+
+When $\Delta_0$ is small, the effective coarse cell becomes large, so fewer vectors fall outside it, and overload frequency decreases. However, a very small $\Delta_0$ compresses the dynamic range, and the most significant digits may not be fully utilized. When $\Delta_0$ is large, the coarse cell becomes tight, making it more likely that vectors exceed it, and thus, overload frequency increases. In such regimes, one may need to increase $q,M$, or both to ensure that the representation can encode the required variation through deeper hierarchical digits.
+
+If a vector exceeds the base cell only slightly, the resulting residual can still have a very small norm, meaning the quantization error at the base level remains low. In such cases typically when overload rates are < 1\%, one may deliberately omit residual correction to gain compute and time savings. This is a designer’s choice: skipping residual refinement may slightly inflate measured accuracy but does not meaningfully harm fidelity when overload is negligible. Conversely, once overload > 1\%, the base projection alone is no longer faithful, and residual correction becomes essential. Configurations with high accuracy and low overload are ideal, whereas high accuracy and high overload remain acceptable but require residual correction, increasing compute cost.
+In contrast, regimes with low accuracy, regardless of overload, indicate unsuitable quantization settings.
+
+Our experiments show that when overload is reduced either by choosing an appropriate $\Delta_{0}$ or by selecting $q,M$ pairs that avoid excessive residuals, the quantizer behaves more stably, and performance at low precision improves. Thus, reducing overload reliably mitigates degradation and restores stable behavior in the low-bit regime.
+
+\textbf{f) Comparing $\Delta_0$: }
+We study the sensitivity of lattice-based quantization to the choice of the base scaling parameter $\Delta_0$ by comparing a smaller $\Delta_0=0.3$ against a higher setting of $\Delta_0=1.5$ across datasets and decoding strategies as shown in Figure \ref{Delta_analysis}.
+
+Across all datasets, $\Delta_0=1.5$ yields consistently stable performance for both Exact and Babai, with F1 scores closely matching those achieved at moderate and high bit-widths. In contrast, $\Delta_0=0.3$ exhibits pronounced instability, particularly for Exact projection at low bit-widths. This is most evident on AntShield and SMS Spam datasets, where Exact with $\Delta_0=0.3$ collapses at 1-2 bits and only recovers once sufficient precision is available.
+
+Babai is markedly more robust to aggressive scaling. Even with $\Delta_0=0.3$, Babai maintains competitive performance at low bit-widths. This robustness is consistent across datasets, indicating that approximate decoding mitigates the sensitivity to scaling mismatch.
+
+As bit-width increases, the impact of $\Delta_0$ diminishes. Beyond approximately 4-5 bits, both $\Delta_0$ settings converge to similar performance levels, and differences between Exact and Babai decoding become marginal. This suggests that $\Delta_0$ primarily governs behavior in the low-bit regime, where quantization noise and overload effects dominate. Overall, these results highlight a trade-off between aggressiveness and stability: a smaller $\Delta_0$ can be effective when combined with robust decoding (Babai), but Exact decoding requires a more conservative scale to avoid overload.
+
+
+\begin{figure}[]
+\centering
+\begin{tabular}{c c}
+    \includegraphics[ width=0.49\linewidth, height=0.3\linewidth]{Plots/Delta_Analysis/RECON_Exact_Babai_D0_0.3_1.5_full.png} &
+    \includegraphics[ width=0.49\linewidth, height=0.3\linewidth]{Plots/Delta_Analysis/RECON_Exact_Babai_D0_0.3_1.5_zoomed.png} \\
+    \includegraphics[ width=0.49\linewidth, height=0.3\linewidth]{Plots/Delta_Analysis/IMDB_Exact_Babai_D0_0.3_1.5_full.png} &
+    \includegraphics[ width=0.49\linewidth, height=0.3\linewidth]{Plots/Delta_Analysis/IMDB_Exact_Babai_D0_0.3_1.5_zoomed.png} \\
+    \includegraphics[ width=0.49\linewidth, height=0.3\linewidth]{Plots/Delta_Analysis/ANTS_Exact_Babai_D0_0.3_1.5_full.png} &
+    \includegraphics[ width=0.49\linewidth, height=0.3\linewidth]{Plots/Delta_Analysis/ANTS_Exact_Babai_D0_0.3_1.5_zoomed.png} \\
+  \includegraphics[ width=0.49\linewidth, height=0.3\linewidth]{Plots/Delta_Analysis/SPAM_Exact_Babai_D0_0.3_1.5_full.png} &
+    \includegraphics[ width=0.49\linewidth, height=0.3\linewidth]{Plots/Delta_Analysis/SPAM_Exact_Babai_D0_0.3_1.5_zoomed.png} \\
+    
+\end{tabular}
+\caption{Comparison of VQ for $\Delta_0$ (full and zoomed version of left and right, respectively).}
+\label{Delta_analysis}
+\end{figure}
+
+\textbf{g) QUIP\# results} 
+
+While OPTQ\cite{optq} (also referred to as GPTQ ) is a widely used PTQ method — particularly within the Hugging Face ecosystem and LLM-focused workflows — we selected QuIP as a baseline because it is a more recent and strictly stronger method than OPTQ. As noted by the QuIP authors, GPTQ/OPTQ can be viewed as a special case of QuIP: in the absence of incoherence-inducing preprocessing, QuIP reduces to OPTQ. In this sense, the inclusion of QuIP already subsumes GPTQ-style approaches for the regimes considered in this paper.  QuIP\# \cite{quip2} from the same authors improved QuIP by incorporating E8 lattice-based vector quantization codebooks, enabling more expressive and structured quantization. In this sense, QuIP\#, with its incoherent preconditioning and lattice quantization, subsumes GPTQ-style approaches for our target settings and is a more relevant baseline for our setting.
+
+For the aforementioned reasons, we additionally evaluate QuIP\# for quantizing the BERT encoder and keep the MLP head quantized/trained using our existing E8-QAT setup. We run a two-pass procedure over the BERT's linear layers: (i) compute and cache a layer-wise Hessian using forward hooks on training batches, and (ii) quantize each layer using the cached Hessian and a chosen codebook. For efficiency and stability, we skip attention projection layers (query/key/value and attention output projection) and optionally exclude embeddings/LayerNorm. After replacing the corresponding BERT linear modules with quantized ones, we freeze all BERT parameters (PTQ mode) and train only the MLP parameters. We repeat this for multiple matched-precision settings by selecting the codebook and MLP configuration per bit-width (e.g., 2/3/4-bit: BERT codebook $\rightarrow$ MLP $(q,M)$). Table \ref{tab:quiphash_bert_qat_mlp} shows that 2-bit PTQ benefits from Babai decoding in all datasets except AntShield, while 3–4 bits yield better performance in the Exact setting across datasets.
+\begin{table}[h]
+    \centering
+    \scriptsize
+    \caption{QUIP\# on BERT and QAT on MLP.}
+    \label{tab:quiphash_bert_qat_mlp}
+    \begin{tabular}{|p{0.6cm}|p{1.1cm}|p{1.2cm}|p{1.6cm}|p{1.2cm}|p{0.8cm}|p{1.2cm}|p{1.6cm}|p{1.2cm}|p{0.8cm}|p{1.2cm}|p{1.2cm}|p{1cm}|} \hline
+       \multirow{3}{*}{\textbf{B-bits}}&\multirow{3}{*}{\textbf{M-Bits}}&
+       \multicolumn{2}{|c|}{\textbf{VQ-Exact}} & \multicolumn{2}{|c|}{\textbf{VQ-Babai}} & \multicolumn{2}{|c|}{\textbf{VQ-Exact}} & \multicolumn{2}{|c|}{\textbf{VQ-Babai}} \\ \cline{3-10}
+       & & \textbf{F1}$^{\star}$ &\textbf{OL\%}$^{\ast}$&\textbf{F1}$^{\star}$&\textbf{OL\%}$^{\ast}$ & \textbf{F1}$^{\star}$&\textbf{OL\%}$^{\ast}$&\textbf{F1}$^{\star}$&\textbf{OL\%}$^{\ast}$  \\ \hline
+       \rowcolor{black!20}
+       & & \multicolumn{4}{|c|}{\textbf{ReCon}}	&	\multicolumn{4}{|c|}{\textbf{IMDB}}	\\\hline
+       2.00&2.00b(4,1)&56.53/85.29 &0.016/0.04,0.02 & \textbf{64.26}/67.32 & 0\textbf{/}0,0 &
+                44.58/78.54&0.008/0.04,0.01& \textbf{64.85}/66.67 & 0/0,0 \\
+                
+        3.00 & 3.00b(8,1) & 60.48/87.65 & 0.016/0.06,0.01& 58.55/68.02 & 0/0,0 & 
+                    \textbf{64.61}/87.12&0.018/0.06,0.02 &  62.76/78.33 & 0/0,0\\
+                    
+        4.00 & 4.00b(16,1) & \textbf{61.94}/NA & 0.031/NA  & 64.08/NA & 0/NA & 
+                    51.96/NA & 0.031/NA & 55.16/NA & 0/NA\\ \hline
+\rowcolor{black!20}
+& & \multicolumn{4}{|c|}{\textbf{AntShield}}	&	\multicolumn{4}{|c|}{\textbf{SMS Spam}}\\ \hline
+ 2.00&2.00b(4,1)&  47.30/89.17 &0.014/0.03,0.01& 37.10/57.06& 0/0,0
+ & 63.44/96.05&0.014/0.03,0.01 & 73.00/7.55 & 0/0,0\\
+3.00 & 3.00b(8,1)& \textbf{62.35}/90.95&0.012/0.06,0.01 &56.18/27.85 & 0/0,0
+&84.21/98.65&0.012/0.05,0.01& \textbf{81.18}/26.57 & 0/0,0\\
+4.00 & 4.00b(16,1) & 60.63/NA&0.020/NA & \textbf{62.22}/NA& 0/NA
+&\textbf{89.87}/NA&0.022/NA & 75.26/NA & 0/NA \\ \hline
+% & & \multicolumn{4}{|c|}{AG News}	\\ \cline{1-6}
+% 2&2(4,1)& \\
+% 3 & 3(8,1)& \\
+% 4 & 4(16,1) & \\  \cline{1-6}
+    \end{tabular}
+    \parbox{\linewidth}{\scriptsize $^{\star}$ Comparing F1- score of QUIP\# on BERT + QAT on MLP / BERT+MLP end-to-end QAT (Refer Table \ref{bert_results_f}). \\$^{\ast}$Comparing OL\% of QUIP\# on BERT + QAT on MLP (MLP overload)/ BERT+MLP end-to-end QAT (BERT overload, MLP overload).}    
+\end{table}
+
+We also apply QuIP\# in a pure PTQ setting to the MLP classifier operating on fixed BERT embeddings. Specifically, we quantize only the first MLP layer (768→512) using QuIP\#, while keeping activations and the classification head in FP32. The Hessian for the quantized layer is computed from training embeddings, cached, and reused across runs. This setting isolates the effect of QuIP\# weight-only PTQ on downstream classification performance. In contrast to end-to-end quantization, weight-only PTQ of the MLP using QuIP\# (Table \ref{quip_hash_2}) shows minimal accuracy degradation even at low precision, confirming that most sensitivity arises from encoder quantization rather than the classifier head.
+\begin{table}[h]
+    \centering
+    \scriptsize
+        \caption{QuIP\# on MLP after training FP32 BERT+MLP}
+    \label{quip_hash_2}
+    \begin{tabular}{|p{0.9cm}|p{2cm}|p{2cm}|p{2cm}|p{2cm}|}\hline
+        \textbf{M-Bit(s)} &  \textbf{ReCon}$^{\star}$ & \textbf{IMDB}$^{\star}$ & \textbf{AntShield}$^{\star}$ & \textbf{SMS Spam}$^{\star}$ \\ \hline
+        2.00 & 93.63/92.87, 92.30 & 85.26/84.05, 82.28 & 92.93/92.59, 91.31 &  \textbf{97.28}/94.95, 95.95 \\ 
+        3.00 & \textbf{93.99}/93.23, 91.25 & 85.70/83.12, 91.92 & \textbf{93.44}/92.33, 92.11 & 96.95/96.95, 95.62  \\
+        
+        4.00 & 93.93/93.13, 92.22 & \textbf{86.02}/84.03, 82.03 & 92.97/92.83, 91.90 &  96.95/94.59, 95.21 \\ \hline
+    \end{tabular}
+ \parbox{\linewidth}{\scriptsize $^{\star}$ Comparing F1- score of QUIP\# on FP32 MLP trained on FP32 BERT embeddings / QAT (Exact, Babai)on MLP trained on FP32 BERT embeddings  (Refer Table \ref{SQVQ-8}).} 
+\end{table}
+
+Overall, the results show that BERT+MLP end-to-end QAT beats PTQ on BERT and QAT on MLP. Whereas, in setting wherein only MLP is quantized and BERT remains full precision, QUIP\# is comparable or better than QAT on MLP. 
+
+\section{Exploring $D_4$ Lattice}
+To assess the generality of the proposed VQ framework beyond $E_8$ lattice, we additionally explore $D_4$ lattice. This allows us to verify that the core design is not specific to $E_8$, but extends naturally to other lattice families. 
+\subsection{Nearest-neighbor projection of $D_4$ lattice}
+The $D_4$ lattice consists of integer vectors with even coordinate sum, enabling a simple parity-based correction rule. Algorithm \ref{alg:qd4_simple} implements exact nearest-neighbor projection onto $D_4$ by first rounding to $\mathbb{Z}^4$ and, when the parity constraint is violated, flipping the coordinate with the largest rounding residual to obtain the closest valid lattice point.
+
+\begin{algorithm}[h]
+\caption{Nearest-neighbor projection $Q_{D_4}(x)$}
+\label{alg:qd4_simple}
+\scriptsize
+\DontPrintSemicolon
+\KwIn{$x\in\mathbb{R}^4$ (or batch $x\in\mathbb{R}^{B\times 4}$)}
+\KwOut{$y\in D_4$}
+
+\nl $f \leftarrow \mathrm{custom\_round}(x)$;\;
+$y \leftarrow \begin{cases}
+f, & \text{if } (\sum_i f_i)\bmod 2 = 0\\
+g(x), & \text{otherwise}
+\end{cases}$\;
+
+\vspace{2pt}
+\hrule
+\vspace{2pt}
+
+\nl \textbf{Helper-1:} $\mathrm{custom\_round}(v)=\lfloor v-\operatorname{sign}(v)\varepsilon+\tfrac12\rfloor$,
+where $\varepsilon>0$ is tiny (ties at $\pm0.5$ resolved toward $0$).\;
+
+\nl \textbf{Helper-2:} Let $f(x)=\mathrm{custom\_round}(x)$ and
+$k=\arg\max_j |x_j-f(x)_j|$.
+Then $g(x)$ equals $f(x)$ except at coordinate $k$, which is changed by $\pm1$,
+so that the parity of $\sum_i f(x)_i$ flips and ties are resolved consistently.\;
+\end{algorithm}
+
+
+\begin{table}[h]
+\scriptsize
+    \caption{VQ Exact results using D4 Lattice for FP32 BERT and QAT on MLP.}
+    \label{tab:d4MLP}
+    \begin{tabular}{|p{1.2cm}|p{1.2cm}|p{1cm}|p{1.2cm}|p{1cm}|p{1.2cm}|p{1cm}|p{1.2cm}|p{1cm}|} \hline
+    
+       \multirow{2}{*}{\textbf{M-Bit(s)}}  &  \textbf{F1}$^{\star}$ & \textbf{OL\%}$^{\star}$ &  \textbf{F1}$^{\star}$ & \textbf{OL\%}$^{\star}$ &  \textbf{F1}$^{\star}$ & \textbf{OL\%}$^{\star}$ &  \textbf{F1}$^{\star}$ & \textbf{OL\%}$^{\star}$ \\ \cline{2-9}
+       \rowcolor{black!20}
+         & \multicolumn{2}{|c|}{\textbf{ReCon}} & \multicolumn{2}{|c|}{\textbf{IMDB}} & \multicolumn{2}{|c|}{\textbf{AntShield}} & \multicolumn{2}{|c|}{\textbf{SMS Spam}} \\ \hline
+% 1.00(2,1) & 70.58	& 0.000	& 67.41	& 0.000	& 66.77	& 0.000	& 49.03	& 0.000	\\
+% 1.58(3,1)	& 88.31	& 6.957	& 82.80	& 7.274	& 86.64	& 7.527	& 94.39	& 13.313\\
+% 2.00(2,2)	& 93.60	& 0.000	& 83.79	& 0.000	& 92.65	& 0.000	& 95.59	& 0.000	\\
+% 2.00(4,1)	& 93.37	& 0.036	& 83.04	& 0.031	& 92.85	& 0.024	& 96.27	& 0.031	\\
+% 2.32(5,1)	& 93.08	& 0.459	& 83.23	& 0.561	& 92.03	& 0.475	& 97.30	& 0.626	\\
+% 2.58(6,1)	& 93.20	& 0.012	& 82.58	& 0.018	& 92.59	& 0.019	& 96.95	& 0.035	\\
+% 2.81(7,1)	& 93.30	& 0.094	& 81.76	& 0.131	& 92.75	& 0.101	& 95.92	& 0.189	\\
+% 3.00(2,3)	& 93.26	& 0.000	& 84.18	& 0.000	& 92.89	& 0.000	& 96.97	& 0.000	\\
+% 3.00(8,1)	& 93.26	& 0.008	& 82.77	& 0.009	& 92.34	& 0.004	& 95.33	& 0.036	\\
+% 3.17(3,2)	& 93.25	& 4.537	& 83.34	& 4.885	& 92.53	& 4.454	& 92.11	& 4.839	\\
+% 4.00(2,4)	& 93.11	& 0.000	& 84.44	& 0.000	& 92.66	& 0.000	& 96.35	& 0.000	\\
+% 4.00(4,2)	& 93.48	& 0.015	& 82.39	& 0.038	& 92.96	& 0.011	& 95.39	& 0.075	\\
+% 4.00(16,1)	& 93.10	& 0.012	& 81.78	& 0.034	& 92.61	&  0.009	& 95.27	& 0.054	\\   \hline    1.00(2,1)	& 68.02/70.58 &	0/0			& 66.71/67.41	& 0/0			&   0/66.77	    & 0/0		& 0 /49.03		& 0/0		  \\
+1.00b(2,1)	& 69.46/70.58	& 0.02/0  	 &	67.22/67.41 &	0/0		    & 68.04/66.77	& 0.04/0	 & 78.10/49.03	& 0.01/0 \\
+1.58b(3,1)  & 92.87/88.31	& 2.25/6.96  &	82.97/82.80 &	2.62/7.27	& 92.09/86.64	& 2.38/7.53	 & 93.65/94.39	& 2.25/13.31 \\ \hline
+2.00b(2,2)& 78.79/93.60	& 60.81/0 	 & 	83.03/83.79 &	61.42/0		& 78.25/92.65	& 60.68/0    & 90.41/95.59	& 59.01/0    \\
+2.00b(4,1)& 92.87/93.37	& 0.02/0.04  &	84.05/83.04 &	0.02/0.03	& 92.59/92.85	& 0.01/0.02	 & 94.95/96.27	& 0.01/0.03 \\
+2.32b(5,1)& 92.90/93.08	& 0/0.46  	 &	83.19/83.23 &	0.01/0.56	& 92.48/92.03	& 0/0.48	 & 96.00/97.30	& 0.01/0.63 \\
+2.58b(6,1)& 92.93/93.20	& 0.01/0.01  &	82.59/82.58 &	0.01/0.09	& 92.73/92.59	& 0.01/0.02	 & 95.36/96.95	& 0.02/0.04 \\
+2.81b(7,1)& 93.44/93.30	& 0/0.09  	 &	82.79/81.76 &	0.01/0.13	& 92.82/92.75	& 0/0.10	 & 97.28/95.92	& 0.01/0.19 \\ \hline
+3.00b(2,3)& 79.56/93.26	& 79.14/0 	 & 	83.12/84.18 &	79.88/0		& 77.21/92.89	& 78.64/0    & 90.10/96.97	& 76.70/0   \\
+3.00b(8,1)& 93.23/93.26	& 0/0.01     &	83.12/82.77 &	0/0.01		& 92.33/92.34	& 0.01/0	 & 96.95/95.33	& 0.01/0.04 \\
+3.17b(3,2)& 93.24/93.25	& 1.00/4.54  &	84.43/83.34 &	1.28/4.89	& 92.25/92.53	& 1.14/4.45	 & 96.64/92.11	& 1.42/4.84 \\ \hline
+4.00b(2,4)& 80.82/93.11	& 83.71/0    & 	84.03/84.44 &	84.97/0		& 79.12/92.66	& 84.03/0    & 92.36/96.35	& 81.96/0    \\
+4.00b(4,2)& 93.13/93.48	& 0.40/0.02  &	83.42/82.39 &	0.39/0.04	& 92.83/92.96	& 0.35/0.01	 & 94.59/95.39	& 0.30/0.08  \\ \hline
+    \end{tabular}
+    \parbox{\linewidth}{\scriptsize $^{\star}$ Comparing F1- score and overload of QAT (Exact) on MLP trained on FP32 BERT embeddings \textbf{(E8/D4)} (Refer Table \ref{SQVQ-8} for E8). } 
+\end{table}
+
+\subsection{Quantization of only MLP}
+Table~\ref{tab:d4MLP} reports results for quantizing only the MLP classifier while keeping the BERT in FP32, comparing Exact VQ based on the $E_8$ and $D_4$ lattices. At 1.0 bits, both lattices exhibit lower F1 score than higher bid-widths, but still are stable. As the effective bit-rate increases to $\approx$1.58 bits and beyond, there is a significant lift in performance, maintaining negligible overload. These results indicate that the proposed VQ framework applies consistently across lattice choices in a setting where only MLP is quantized.
+% \begin{table}[h]
+% \scriptsize
+%     \caption{VQ Exact results using D4 Lattice for FP32 BERT and MLP-QAT.}
+%     \label{tab:d4MLP}
+%     \begin{tabular}{|p{1.4cm}|p{1cm}|p{1cm}|p{1cm}|p{1cm}|p{1cm}|p{1cm}|p{1cm}|p{1cm}|p{1cm}|p{1cm}|} \hline
+    
+%        Bits  &  F1 & OL\% &  F1 & OL\%&  F1 & OL\%&  F1 & OL\%&  F1 & OL\%\\ \cline{2-11}
+%          & \multicolumn{2}{|c|}{ReCon} & \multicolumn{2}{|c|}{IMDB} & \multicolumn{2}{|c|}{AntShield} & \multicolumn{2}{|c|}{SMS Spam} & \multicolumn{2}{|c|}{AG News} \\ \hline
+% 1.00(2,1)	& 70.58	& 0.000	& 67.41	& 0.000	& 66.77	& 0.000	& 49.03	& 0.000	& 83.99	& 0.000\\
+% 1.58(3,1)	& 88.31	& 6.957	& 82.80	& 7.274	& 86.64	& 7.527	& 94.39	& 13.313& 	87.58& 	6.230\\
+% 2.00(2,2)	& 93.60	& 0.000	& 83.79	& 0.000	& 92.65	& 0.000	& 95.59	& 0.000	& 91.09	& 0.000\\
+% 2.00(4,1)	& 93.37	& 0.036	& 83.04	& 0.031	& 92.85	& 0.024	& 96.27	& 0.031	& 91.20	& 0.022\\
+% 2.32(5,1)	& 93.08	& 0.459	& 83.23	& 0.561	& 92.03	& 0.475	& 97.30	& 0.626	& 90.60	& 0.196\\
+% 2.58(6,1)	& 93.20	& 0.012	& 82.58	& 0.018	& 92.59	& 0.019	& 96.95	& 0.035	& 91.08	& 0.000\\
+% 2.81(7,1)	& 93.30	& 0.094	& 81.76	& 0.131	& 92.75	& 0.101	& 95.92	& 0.189	& 91.30	& 0.005\\
+% 3.00(2,3)	& 93.26	& 0.000	& 84.18	& 0.000	& 92.89	& 0.000	& 96.97	& 0.000	& 91.29	& 0.000\\
+% 3.00(8,1)	& 93.26	& 0.008	& 82.77	& 0.009	& 92.34	& 0.004	& 95.33	& 0.036	& 90.86	& 0.000\\
+% 3.17(3,2)	& 93.25	& 4.537	& 83.34	& 4.885	& 92.53	& 4.454	& 92.11	& 4.839	& 91.00	& 2.206\\
+% 4.00(2,4)	& 93.11	& 0.000	& 84.44	& 0.000	& 92.66	& 0.000	& 96.35	& 0.000	& 90.89	& 0.000\\
+% 4.00(4,2)	& 93.48	& 0.015	& 82.39	& 0.038	& 92.96	& 0.011	& 95.39	& 0.075	& 90.57	& 0.000\\
+% 4.00(16,1)	& 93.10	& 0.012	& 81.78	& 0.034	& 92.61	&  0.009	& 95.27	& 0.054	& 91.01	& 0.000 \\   \hline       
+         
+%     \end{tabular}
+% \end{table}
+\subsection{Quantization of both BERT and MLP}
+\begin{table}[h]
+\scriptsize
+    \centering
+    \caption{VQ Exact results using D4 Lattice for BERT(B)+MLP(M) end-to-end QAT.}
+    \label{tab:d4_bert_exact}
+    \scriptsize
+    \begin{tabular}{|p{0.9cm}|p{1.1cm}|p{1.8cm}|p{1.1cm}|p{1.8cm}|p{1.1cm}|p{1.8cm}|p{1.1cm}|p{1.8cm}|} \hline
+       \textbf{Config}  &  \multicolumn{2}{|c|}{\textbf{ReCon}}&  \multicolumn{2}{|c|}{\textbf{IMDB}}&  \multicolumn{2}{|c|}{\textbf{AntShield}}&  \multicolumn{2}{|c|}{\textbf{SMS Spam}}\\\cline{2-9}
+         & \textbf{F1}$^{\star}$ & \textbf{OL\%(B,M)}$^{\ast}$ & \textbf{F1}$^{\star}$ & \textbf{OL\%(B,M)}$^{\ast}$ & \textbf{F1}$^{\star}$ & \textbf{OL\%(B,M)}$^{\ast}$ & \textbf{F1}$^{\star}$ & \textbf{OL\%(B,M)}$^{\ast}$  \\ \hline
+         1.00b(2,1) & 68.25/78.56 & 0.41,0.27/0,0 & 82.37/81.56 & 0.44,0.27/0,0 & 71.33/81.41 & 0.41,0.28/0,0 & 0/95.36 & 0.48,0/0.27,0 \\
+         
+         2.00b(4,1) & 85.29/86.43 & 0.04,0.02/0.05,0.03 & 78.54/84.09 & 0.04,0.01/0.04,0.02 & 89.17/87.27 & 0.03,0.01/0.04,0.02 & 96.05/95.42 & 0.03,0.01/0.05,0.02 \\
+         
+         3.00b(8,1) & 87.65/87.57 & 0.06,0.01/0.07,0.04 & 87.12/85.42 & 0.06,0.02/0.08,0.03 & 90.95/90.47 & 0.06,0.01/0.07,0.03 & 98.65/97.33 & 0.05,0.01/0.08,0.03  \\ \hline
+    \end{tabular}
+\parbox{\linewidth}{\scriptsize $^{\star}$ Comparing F1- score of QAT (Exact) BERT+MLP trained end-to-end \textbf{(E8/D4)} (Refer Table \ref{SQVQ-8} for E8).\\
+$^{\ast}$ Comparing overload (Bert overload, MLP overload) of QAT (Exact) BERT+MLP trained end-to-end \textbf{(E8/D4)} (Refer Table \ref{bert_results_f} for E8)
+} 
+\end{table}
+Table~\ref{tab:d4_bert_exact} reports end-to-end QAT results when both the BERT and MLP classifier are quantized using Exact VQ, for $D_4$ lattice (comparing to $E_8$). At 1 bit, model is unstable for SMS Spam dataset while gives descent performance at such low precision for other datasets, accompanied by minimal overload in both BERT and MLP layers.
+
+As the weight precision increases to 2–3 bits, accuracy improves substantially, with both lattices yielding comparable trends. Overall, the results indicate that the proposed VQ framework extends naturally to end-to-end quantization of both BERT and MLP across different lattices.  
+
+\section{Activation quantization}
+While the main paper focuses on weight-only quantization (activations kept in FP32), we additionally study whether activation quantization can be combined with the proposed weight VQ. We evaluate QAT for weight quantization with ACIQ-based\cite{banner2018aciq} activation in two settings: (i) quantizing only the MLP and keeping BERT in full precision, and (ii) end-to-end BERT+MLP QAT.
+
+In our implementation, each quantized linear layer applies ACIQ after the linear output. Running activation statistics are tracked using EMA, and a symmetric clipping threshold $\alpha$ is computed analytically. We use the mixed ACIQ variant, which selects between Laplace and Gaussian-based thresholds by minimizing estimated MSE. Activations are uniformly quantized with step size $\Delta=\alpha/2^{b_a-1}$.
+
+\subsection{Quantization of only MLP}
+Across datasets, the results in Table~\ref{tab:aciq_mlp_appendix} suggest the presence of multiple operating regimes depending on the relative precision of weights and activations. 
+Configurations with higher weight precision and higher activation precision (e.g., 3-bit weight with 8-bit activation) tend to exhibit comparatively stable performance across datasets, with lower overload. 
+In contrast, configurations with similar weight precision (e.g., 3-bit) but reduced activation precision ($<$2 bits) mostly show bit-reduced performance in ReCon and AntShield datasets.
+
+When both weights and activations are quantized aggressively ($<$2 weight and $<8$ activation bits), training becomes unstable. In contrast, maintaining high activation precision while moderately quantizing weights appears to be a safe choice. 
+These observations indicate that, for a fixed weight precision (e.g., $\le 3$ bits), higher activation precision (8 bits) represents a safer operating region, while reducing activation bits introduces a more challenging regime that requires careful handling.
+
+\begin{table}[h]
+    \centering
+    \caption{Results of FP32 BERT and MLP-QAT using E8 VQ-Exact with fixed clipping=2.0 on weights and for activations using ACIQ. Here, `W' means weight bit and `A' means activation bit. FP-A means full precision activation (without ACIQ).}
+    \label{tab:aciq_mlp_appendix}
+    \scriptsize
+    \begin{tabular}{|p{1.45cm}|p{0.65cm}|p{0.65cm}|p{0.65cm}|p{0.65cm}|p{0.65cm}|p{0.65cm}|p{0.65cm}|p{0.65cm}|p{0.65cm}|p{0.65cm}|p{0.65cm}|p{0.65cm}|} \hline
+         \multirow{2}{*}{\textbf{M-Bits(W/A)}}& \multicolumn{3}{|c|}{\textbf{ReCon}}& \multicolumn{3}{|c|}{\textbf{IMDB}} & \multicolumn{3}{|c|}{\textbf{AntShield}} & \multicolumn{3}{|c|}{\textbf{SMS Spam}}\\
+         \cline{2-13}
+         & \textbf{FP-A} &\textbf{F1}& \textbf{OL\%} & \textbf{FP-A }& \textbf{F1} & \textbf{OL\%} & \textbf{FP-A} & \textbf{F1} & \textbf{OL\%} & \textbf{FP-A} & \textbf{F1} & \textbf{OL\%} \\ \hline
+% 1.00(2,1)/2    &    68.02    &    0.00    &    66.71    &    0.00    &    0.00    &    0.00    &    0.00    &    0.00   \\
+% 1.00(2,1)/3    &    68.02    &    0.00    &    66.71    &    0.00    &    0.00    &    0.00    &    0.00    &    0.00   \\
+% 1.00(2,1)/4    &    68.02    &    0.00    &    66.71    &    0.00    &    0.00    &    0.00    &    0.00    &    0.00   \\
+% 1.00(2,1)/8    &    68.02    &    0.00    &    66.71    &    0.00    &    0.00    &    0.00    &    0.00    &    0.00   \\ \hline
+% 1.58(3,1)/2    &    68.02    &    0.00    &    66.71    &    0.00    &    0.00    &    0.00    &    0.00    &    0.00   \\
+% 1.58(3,1)/3    &    68.02    &    0.00    &    66.71    &    0.00    &    0.00    &    0.00    &    0.00    &    0.00   \\
+% 1.58(3,1)/4    &    68.02    &    0.00    &    66.71    &    0.00    &    0.00    &    0.00    &    0.00    &    0.00   \\
+% 1.58(3,1)/8    &    68.02    &    0.00    &    66.71    &    0.00    &    0.00    &    0.00    &    0.00    &    0.00   \\ \hline
+% 2.00(2,2)/2    &    68.02    &    0.00    &    66.71    &    0.00    &    0.00    &    0.00    &    0.00    &    0.00   \\
+% 2.00(2,2)/3    &    68.02    &    0.00    &    66.71    &    0.00    &    0.00    &    0.00    &    0.00    &    0.00   \\
+% 2.00(2,2)/4    &    68.02    &    0.00    &    66.71    &    0.00    &    0.00    &    0.00    &    0.00    &    0.00   \\
+% 2.00(2,2)/8    &    68.02    &    0.00    &    66.71    &    0.00    &    0.00    &    0.00    &    0.00    &    0.00   \\
+% \hline
+% 2.00(4,1)/2    &    68.02    &    0.00    &    66.71    &    0.00    &    0.00    &    0.00    &    0.00    &    0.00   \\
+% 2.00(4,1)/3    &    68.02    &    0.00    &    66.71    &    0.00    &    0.00    &    0.00    &    0.00    &    0.00   \\
+% 2.00(4,1)/4    &    68.02    &    0.00    &    66.71    &    0.00    &    0.00    &    0.00    &    0.00    &    0.00   \\
+% 2.00(4,1)/8    &    68.02    &    0.00    &    66.71    &    0.00    &    0.00    &    0.00    &    0.00    &    0.00   \\
+% \hline
+% 2.32(5,1)/2    &    68.02    &    0.00    &    66.71    &    0.00    &    0.00    &    0.00    &    4.26    &    0.00   \\
+% 2.32(5,1)/3    &    68.02    &    0.00    &    66.71    &    0.00    &    0.00    &    0.00    &    12.12    &    0.00  \\
+% 2.32(5,1)/4    &    68.02    &    0.00    &    66.71    &    0.00    &    0.00    &    0.00    &    18.32    &    0.00  \\
+% 2.32(5,1)/8    &    68.02    &    0.00    &    66.71    &    0.00    &    0.00    &    0.00    &    4.26    &    0.00   \\
+% \hline
+% 2.58(6,1)/2    &    68.02    &    0.00    &    66.04    &    0.00    &    55.95    &    0.00    &    37.45    &    0.00 \\
+% 2.58(6,1)/3    &    70.09    &    0.00    &    68.83    &    0.00    &    64.56    &    0.00    &    70.12    &    0.00 \\
+% 2.58(6,1)/4    &    72.22    &    0.00    &    70.70    &    0.00    &    67.22    &    0.00    &    74.42    &    0.00 \\
+% 2.58(6,1)/8    &    70.09    &    0.00    &    68.83    &    0.00    &    64.56    &    0.00    &    70.12    &    0.00 \\
+% \hline
+% 2.81(7,1)/2    &    70.48    &    0.00    &    73.31    &    0.00    &    69.99    &    0.00    &    86.41    &    0.00 \\
+% 2.81(7,1)/3    &    73.31    &    0.00    &    75.37    &    0.00    &    75.24    &    0.00    &    87.87    &    0.00 \\
+% 2.81(7,1)/4    &    75.10    &    0.00    &    78.71    &    0.00    &    78.99    &    0.00    &    88.82    &    0.00 \\
+% 2.81(7,1)/8    &    73.31    &    0.00    &    75.37    &    0.00    &    75.24    &    0.00    &    87.87    &    0.00 \\
+% \hline
+3.00(2,3)/2    &   \multirow{4}{*}{79.56} & 70.42    &    1.82    & \multirow{4}{*}{83.12}   & 75.66    &    2.11    &  \multirow{4}{*}{77.21}  & 72.89    &    2.10    &  \multirow{4}{*}{90.10}  &76.64    &    2.13 \\
+3.00(2,3)/3    &    & 73.25    &    1.51    &   & 77.76    &    1.63    &  &  72.23    &    1.65    &  &   70.24    &    2.00 \\
+3.00(2,3)/4    &    & 75.31    &    1.32    &   &  77.61    &    1.60    &  &  71.30    &    1.38  &  &    72.51    &    1.83 \\
+3.00(2,3)/8    &   &  73.25    &    1.51    &   &  77.76    &    1.63    &  &   72.23    &    1.65    &  &  70.24    &    2.00 \\ \hline
+3.00(8,1)/2    &  \multirow{4}{*}{93.23} &  80.13    &    0.00    &   \multirow{4}{*}{83.12} &78.67    &    0.00    & \multirow{4}{*}{92.33}   & 80.39    &    0.00    &  \multirow{4}{*}{96.95}  &91.33    &    0.00 \\
+3.00(8,1)/3    &   & 83.73    &    0.00   &  &    80.31    &    0.00    &   &  83.98    &    0.00  &  &    92.11    &    0.00 \\
+3.00(8,1)/4    &    & 84.28    &    0.00 &    &    79.11    &    0.00    &    & 86.34    &    0.00    &    & 95.62    &    0.00 \\
+3.00(8,1)/8    &    & 83.73    &    0.00  &   &    80.31    &    0.00    &  &  83.98    &    0.00    & &    92.11    &    0.00 \\
+\hline
+3.17(3,2)/2    &   \multirow{4}{*}{93.24}& 83.74    &    1.67    &  \multirow{4}{*}{84.43}  &79.34    &    1.40    &   \multirow{4}{*}{92.25}  & 84.41    &    1.78    &    \multirow{4}{*}{96.64} & 92.47    &    1.29 \\
+3.17(3,2)/3    &   &  86.61    &    1.51    &    & 80.00    &    1.49    & &    86.68    &    1.66   &  &    95.02    &    1.32 \\
+3.17(3,2)/4    &    & 87.08    &    1.44    &   &  80.08    &    1.38  &  &    88.06    &  1.61   &  &    94.63    &    1.30 \\
+3.17(3,2)/8    &    & 86.61    &    1.51    &   &  80.00    &    1.49   &  &    86.68    &    1.66  &   &    95.02    &    1.32 \\
+\hline
+4.00(2,4)/2    &   \multirow{4}{*}{80.82} & 76.17    &    82.75    &  \multirow{4}{*}{84.03} & 71.83    &    79.42    &   \multirow{4}{*}{79.12}  &75.30    &    83.80    &   \multirow{4}{*}{92.36}  & 66.09    &    78.74    \\
+4.00(2,4)/3    &    & 79.10    &    88.09   &  &    73.03    &    85.09    &    & 80.02    &    89.57    &   & 71.38    &    83.88   \\
+4.00(2,4)/4    &    & 75.71    &    89.99  &  &    75.96    &    86.22    &    & 79.79    &    91.14    &   &  77.22    &    84.89   \\
+4.00(2,4)/8    &    & 75.71    &    89.99   &  &    75.96    &    86.22    &    & 79.79    &    91.14    &  &   77.22    &    84.89    \\ \hline
+4.00(4,2)/2    &  \multirow{4}{*}{93.13}  &89.04    &    0.00    &  \multirow{4}{*}{83.42}  & 79.19    &    0.00    &   \multirow{4}{*}{92.83} & 88.76    &    0.00    &   \multirow{4}{*}{94.59}  &92.93    &    0.00       \\
+4.00(4,2)/3    &    & 90.23    &    0.00    &    &81.13    &    0.00    &   & 90.16    &    0.00    &    & 92.31    &    0.00       \\
+4.00(4,2)/4    &    & 90.53    &    0.00    &    & 80.48    &    0.00    &    & 89.65    &    0.00    &   &  93.92    &    0.00       \\
+4.00(4,2)/8    &    & 90.53    &    0.00    &    & 80.48    &    0.00    &  &  89.65    &    0.00    &   & 93.92    &    0.00       \\ \hline
+    \end{tabular}
+\end{table}
+
+\begin{table}[h]
+\scriptsize
+    \centering
+        \caption{Results of end-to-end QAT of both BERT and MLP using E8 VQ with fixed clipping=2.0 on weights and for activations using ACIQ. Here, `W' means weight bit and `A' means activation bit. FP-A(QE/QB) means full precision activation (without ACIQ) in end-to-end Exact and Babai settings, respectively (referring to Table \ref{bert_results_f}).}
+    \label{tab:aciqbert}
+    \begin{tabular}{|p{1.4cm}|p{1.1cm}|p{0.7cm}|p{0.7cm}|p{1.1cm}|p{0.7cm}|p{0.7cm}|p{1.1cm}|p{0.7cm}|p{0.7cm}|p{1.1cm}|p{0.7cm}|p{0.7cm}|} \hline
+        \textbf{Config(W/A)} & \textbf{FP-A (QE/QB)}&\textbf{VQ-E} & \textbf{VQ-B} & \textbf{FP-A (QE/QB)}& \textbf{VQ-E} & \textbf{VQ-B} &  \textbf{FP-A (QE/QB)} & \textbf{VQ-E} & \textbf{VQ-B} & \textbf{FP-A (QE/QB)} & \textbf{VQ-E} & \textbf{VQ-B}\\ \hline
+        \rowcolor{black!20}
+        & \multicolumn{3}{|c|}{\textbf{ReCon}} &  \multicolumn{3}{|c|}{\textbf{IMDB}} &  \multicolumn{3}{|c|}{\textbf{AntShield}} &  \multicolumn{3}{|c|}{\textbf{SMS Spam}}\\ \hline
+        2.00(4,1)/2 & 85.29/67.32 & 52.79 & 53.56 & 78.54/66.67 & 51.82 & 52.88& 89.17/57.06 &45.86&45.00& 96.05/7.55& 96.55&16.35\\
+        
+         2.00(4,1)/3 &  & \textbf{71.92} & 36.19 & & 82.35 & 52.80& & 82.27&33.38& & \textbf{97.99}&12.27\\
+         2.00(4,1)/4 & & 58.60 & 53.83 & & 1.18 & \textbf{62.42}& & \textbf{84.78}&35.48& & 97.33&\textbf{25.27}\\
+         2.00(4,1)/8 &  &  70.80 & \textbf{56.09} & & \textbf{85.07} & 1.19& & 76.11&\textbf{57.15}& & 96.05&2.33\\ \hline
+         
+         3.00(8,1)/2 & 87.65/68.02  & 70.43 & 58.50 & 87.12/78.33& 50.67 & 58.06& 90.95/27.85& 59.20&46.70& 98.65/26.57& 97.99&20.85\\
+         
+         3.00(8,1)/3 &  & 85.07 & 38.43 & & 84.57 & 65.36& & 88.61&40.00& & 97.99&23.53\\
+         
+         3.00(8,1)/4 &  & \textbf{87.14} & \textbf{64.48} & & 85.77 & 66.42& & \textbf{91.11}&39.91& & \textbf{99.33}&\textbf{24.24}\\
+         3.00(8,1)/8 &  & 86.94 & 64.44 & & \textbf{86.03} & \textbf{66.67}& & 91.04&\textbf{67.32}& & 97.96&23.93\\ \hline
+    \end{tabular}
+
+\end{table}
+\subsection{Quantization of both BERT and MLP}
+Table~\ref{tab:aciqbert} reports results for end-to-end QAT. Similar to the MLP-only setting, the results indicate distinct operating regions depending on the joint precision of weights and activations. 
+Configurations with moderate-to-high weight precision (e.g., 3 bits) and higher activation precision (4–8 bits) tend to show more stable behavior across datasets, with performance closer to the FP-activation reference. 
+
+When activation precision is reduced while keeping weights fixed (e.g., 3-bit weights with $\le$3-bit activations), performance becomes more variable, and the gap relative to FP-A widens. 
+More aggressive joint quantization of both weights and activations (e.g., 2-bit activations combined with lower-weight precision) exhibits larger degradation and instability, particularly in the end-to-end setting. 
+Overall, the results suggest that, for end-to-end BERT+MLP QAT, operating with moderately quantized weights and comparatively higher activation precision represents a safer regime, whereas lowering activation precision introduces a more challenging region that requires careful tuning.
+
+Overall, these results indicate that incorporating activation quantization alongside weight quantization can be effective, achieving performance close to the corresponding weight-only configurations with full-precision activations (\textit{FP-A} column in Table~\ref{tab:aciq_mlp_appendix} and \ref{tab:aciqbert}). Therefore, the proposed framework naturally extends to joint quantization of both weights and activations within a model. However, when activation quantization is extreme, we need to switch to higher weight bits.
+
+\section{Experiments on multi-class classification dataset}
+We additionally evaluate the proposed quantization framework on \textbf{AG’s News}, a four-class news topic classification benchmark, to assess behavior beyond binary classification. The model setup follows the same pipeline, with experiments covering PTQ and QAT, Exact and Babai settings, both SQ and VQ schemes, and $D_4$ and $E_8$ lattices.
+\begin{table}[h]
+    \centering
+    \tiny
+    \caption{PTQ vs. QAT ($\Delta_0=1.5$ for all VQ settings; $\Delta_0=0.3$ for Babai PTQ). E and B denote Exact and Babai, respectively.}
+    \label{ptqvsQAT-1_news}
+    \begin{tabular}{| p{0.9cm}|p{0.7cm}|p{0.7cm}|p{0.7cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|p{0.6cm}|} \hline
+\textbf{M-Bit(s)} & \multicolumn{3}{|c}{\textbf{QAT}} & \multicolumn{4}{|c|}{\textbf{PTQ}} \\ \cline{2-8}
+& \textbf{Brevitas} & \textbf{VQ-E} &\textbf{ VQ-B} & \textbf{Brevitas} & \textbf{VQ-E} & \textbf{VQ-B} &\textbf{ QuIP}  \\ \hline
+\rowcolor{black!20}
+& \multicolumn{7}{c|}{\textbf{AG'S News}}\\ \hline
+
+1.00	& Error    & 53.39 & \textbf{88.59} & Error & 16.59 & 23.02 & 86.13 \\
+
+1.58 & -	& \textbf{90.76} & 89.68 &    -   & 84.24 & 32.99 & - \\
+
+2.00	& 90.69    & \textbf{90.87} & 90.54 & 74.26 & 87.12 & 43.72 & 89.25\\
+
+2.32 &    -      & \textbf{91.13} & 89.26 &   -    & 88.13& 54.55 & -\\
+
+2.58 &  -		& \textbf{90.62} & 90.45 &    -   & 88.45 & 67.32 & -\\
+
+2.81 &  -		& \textbf{91.08} & 89.84 &   -    & 88.51 & 69.06 & -\\
+
+3.00	& 	 90.62 	& \textbf{91.06} & 90.55 & 89.28 & 86.97& 74.14 & 90.91 \\
+
+3.17 &  - & \textbf{90.96} & 89.76 &   -     & 88.26& 78.86 & - \\
+
+4.00	&  91.20 	& 91.09 & 90.94 & 90.52 & 87.66& 85.25 & \textbf{91.29} \\ \hline
+
+    \end{tabular}
+    \end{table}
+\paragraph{PTQ vs. QAT.}
+As seen in Table~\ref{ptqvsQAT-1_news}, different regimes emerge across bit-widths on the multi-class dataset.
+At 1 bit, VQ with Babai under QAT achieves strong performance, whereas PTQ methods largely fail or severely degrade.
+At 1.58 bits, most QAT variants (VQ-Exact and VQ-Babai) converge to comparable accuracy, whereas PTQ with Babai remains unstable. Beyond 1.58 bits, QAT with VQ-Exact consistently delivers the best performance, while PTQ, particularly Babai, continues to exhibit instability and under-performance below 3 bits.
+These results highlight the advantage of QAT over PTQ in low-precision multi-class settings.
+
+\begin{table}[h]
+    \centering
+        \caption{Comparison of SQ and VQ with $\Delta_0$=1.5. Here, OL represents overload.}
+        \label{SQVQ-8_news}
+    \tiny
+    \begin{tabular}{|p{1.2cm}| 
+    p{0.6cm}| p{0.6cm}| p{0.6cm} |
+    p{0.6cm} |p{0.6cm}| } \hline
+        \textbf{M-Bits(s)} & 
+        \textbf{SQ} & \multicolumn{2}{c|}{\textbf{VQ-Exact}} & \multicolumn{2}{c|}{\textbf{VQ-Babai}}\\
+        
+        \cline{3-6} \ 
+        & &  \textbf{F1} & \textbf{OL\%} &
+        \textbf{F1} & \textbf{OL\%} \\ \hline
+\rowcolor{black!20}
+  & \multicolumn{5}{c|} {\textbf{AG's-News} (FP: 91.25)}\\ \hline
+1.00b(2,1)  &\multirow{2}{*}{Error}&53.39&0.01&88.59&0   \\
+
+1.58b(3,1)  & &\textbf{90.76}&2.59&89.68&0    \\  \cline{2-2} 
+2.00b(2,2)   &\multirow{5}{*}{89.46}&83.96&58.00&90.54&0     \\
+2.00b(4,1)   & & 90.87&0.02&90.54&0\\
+2.32b(5,1)   & & \textbf{91.13}&0&89.26&0\\
+2.58b(6,1)   &  & 90.62&0&90.45&7.58\\
+2.81b(7,1)   & &91.08&0&89.84&0\\ \cline{2-2}
+3.00b(2,3)  &\multirow{3}{*}{88.90}&84.25&73.90&90.55&0   \\
+3.00b(8,1)  & &90.96&0.47&89.76&0\\                     
+3.17b(3,2)   & & \textbf{91.06}&0&90.34&0\\ \cline{2-2} 
+4.00b(2,4)   &\multirow{2}{*}{88.80}&86.18&82.67&90.94&0  \\
+4.00b(4,2)   & & \textbf{91.09}&0.20&90.94&0   \\ \hline 
+\end{tabular}
+\end{table}
+\paragraph{SQ vs. VQ}
+Table~\ref{SQVQ-8_news} shows that at 1 bit, SQ fails to produce a valid model, whereas VQ with Babai achieves strong performance, highlighting the advantage of lattice structure in the 1-bit regime.
+For bit-widths $\ge$1.58, all methods begin to recover accuracy; however, VQ, particularly VQ-Exact, consistently matches or outperforms SQ at the same effective bit-rate, while maintaining negligible overload.
+Overall, these results indicate that VQ provides a more robust and scalable alternative to SQ, especially at low and intermediate precision levels.
+\begin{table}[h]
+    \centering
+    \scriptsize
+    \caption{Comparison of BERT FP32 and quantization performance. Here, $^{\text{PE}}$:PTQ with Exact, $^{\text{PB}}$:PTQ with Babai,  $^{\text{QE}}$:QAT with Exact, $^{\text{QB}}$:QAT with Babai, A: ACIQ on activations with (bits), $^{\text{FP}}$: FP32. For Exact $\Delta_0$=1.5 and for babai $\Delta_0$=0.3}
+    \label{bert_results_f_news}
+   
+    \begin{tabular}{| p{1cm}|p{0.4cm}|p{0.8cm}|p{1.4cm}|p{0.7cm}|p{0.7cm}|p{0.7cm}|p{0.7cm}|} \hline
+\textbf{Config}	&  \textbf{FP32}	& \textbf{B$^{\text{QE}}$M$^{\text{QE}}$} & \textbf{B$^{\text{QE}}$M$^{\text{QE}}$-A}  & \textbf{B$^{\text{F}}$M$^{\text{PE}}$}	&	\textbf{B$^{\text{F}}$M$^{\text{PB}}$}	&	\textbf{B$^{\text{F}}$M$^{\text{QE}}$}	&	\textbf{B$^{\text{F}}$M$^{\text{QB}}$}  \\  \hline
+\rowcolor{black!20}
+& \multicolumn{7}{c|}{\textbf{AG News}} \\ \cline{1-8}
+1.00b(2,1) 	&   \multirow{3}{*}{91.25}   &    90.64  & - & 16.59 & 23.02 & 53.39 & 88.59  \\
+2.00b(4,1)		&      & 91.66   & 92.61(8) & 87.12 & 42.24 & 90.87 & 90.54\\
+3.00b(8,1)		&       & 93.48  & 93.16(8) & 86.97 & 73.33 & 91.06 & 90.34    \\
+\cline{1-8}
+\end{tabular}
+\end{table}
+\paragraph{End-to-end BERT quantization.}
+Table~\ref{bert_results_f_news} reports end-to-end BERT+MLP quantization results under PTQ and QAT.
+Across all bit-widths, PTQ-based approaches (both Exact and Babai) exhibit the weakest performance.
+At 1 bit, QAT with VQ-Exact remains stable when activations are kept in full precision, whereas introducing aggressive activation quantization leads to instability.
+Higher activation precision (8 bits) consistently yields safer and more reliable behavior across configurations. At $>8$ bits it should remain the same. 
+
+
+\begin{table}[h]
+    \centering
+        \caption{VQ Exact results using D4 Lattice for FP32 BERT and QAT on MLP.}
+    \label{VQ_Exact_d4_ag}
+    \scriptsize
+    \begin{tabular}{|p{1.2cm}|p{2cm}|p{2cm}|} \hline
+
+%      Bits  &  F1 & OL\% \\ \cline{2-3}
+% &         \multicolumn{2}{|c|}{AG News} \\ \hline
+% 1.00(2,1)	& 83.99	& 0.000          \\
+% 1.58(3,1)    & 87.58& 6.230      \\
+% 2.00(2,2)	 & 91.09	& 0.000         \\
+% 2.00(4,1)	 & 91.20	& 0.022         \\
+% 2.32(5,1)	  & 90.60	& 0.196        \\
+% 2.58(6,1)	   & 91.08	& 0.000       \\
+% 2.81(7,1)	  & 91.30	& 0.005        \\
+% 3.00(2,3)	  & 91.29	& 0.000        \\
+% 3.00(8,1)	  & 90.86	& 0.000        \\
+% 3.17(3,2)	  & 91.00	& 2.206        \\
+% 4.00(2,4)	 & 90.89	& 0.000         \\
+% 4.00(4,2)	  & 90.57	& 0.000        \\
+% 4.00(16,1)   & 91.01	& 0.000  \\ \hline
+\textbf{M-Bit(s)} & \textbf{F1}$^{\star}$ & \textbf{OL\%}$^{\star}$ \\\hline
+1.00b(2,1)    &    53.39/83.99    &     0.014/0.000\\
+1.58b(3,1)    &    90.76/87.58    &     2.588/6.230\\
+2.00b(2,2)    &    83.96/91.09    &     57.998/0.000\\
+2.00b(4,1)    &    90.87/91.20    &     0.020/0.022\\
+2.32b(5,1)    &    91.13/90.60    &     0.002/0.196\\
+2.58b(6,1)    &    90.62/91.08    &     0.008/0.000\\
+2.81b(7,1)    &    91.08/91.30    &     0.004/0.005\\
+3.00b(2,3)    &    84.25/91.29    &     73.903/0.000\\
+3.00b(8,1)    &    91.06/90.86    &     0.000/0.000\\
+3.17b(3,2)    &    90.96/91.00    &     0.466/2.206\\
+4.00b(2,4)    &    86.18/90.89    &     82.674/0.000\\
+4.00b(4,2)    &    91.09/90.57    &     0.199/0.000\\
+4.00b(16,1)    &    91.20/91.01    &     0.004/0.000\\ \hline
+    \end{tabular}
+    \parbox{\linewidth}{\scriptsize $^{\star}$ Comparing F1- score and overload of QAT (Exact) on MLP trained on FP32 BERT embeddings \textbf{(E8/D4)}. } 
+\end{table}
+
+\begin{table}[]
+\scriptsize
+    \centering
+    \caption{VQ Exact results using D4 Lattice for BERT(B)+MLP(M) end-to-end QAT.}
+    \label{tab:d4_bert_news_data}
+    \scriptsize
+    \begin{tabular}{|p{1.2cm}|p{2cm}|p{2.2cm}|} \hline
+       \textbf{Config}  &  \multicolumn{2}{|c|}{\textbf{AG News}}\\\cline{2-3}
+         & \textbf{F1} & \textbf{OL\%(B,M)} \\ \hline
+         1.00(2,1) & 90.64/90.79 & 0.62, 0.23/0,0\\
+         2.00(4,1) & 91.66/90.89 & 0.03, 0.01/0.04,0.03\\
+         3.00(8,1) & 93.48/90.78 & 0.05, 0.01/0.08,0.04 \\ \hline
+    \end{tabular}
+\parbox{\linewidth}{\scriptsize $^{\star}$ Comparing F1- score of QAT (Exact) BERT+MLP trained end-to-end \textbf{(E8/D4)}.\\
+$^{\ast}$ Comparing overload (Bert overload, MLP overload) of QAT (Exact) BERT+MLP trained end-to-end \textbf{(E8/D4)}.
+} 
+\end{table}
+
+\paragraph{Using $D_4$ Lattice.} To assess whether the proposed VQ framework generalizes beyond the $E_8$ lattice, we additionally evaluate a $D_4$-based VQ-Exact variant. Table ~\ref{VQ_Exact_d4_ag} and \ref{tab:d4_bert_news_data} show results of using $D_4$ lattice in VQ-Exact setup for MLP-only QAT and end-to-end BERT+MLP QAT, respectively. Across bit-widths, the performance and overload behavior obtained with $D_4$ are comparable to those achieved with $E_8$, with similar accuracy trends and low overload in stable operating regimes. These observations indicate that the proposed quantization framework is not tied to a specific lattice choice and can be extended to alternative lattices. 
+
+Overall, the AG’s News experiments confirm that the observed trends on binary datasets extend to multi-class classification: VQ offers improved robustness over SQ, QAT mitigates low-bit degradation, and Exact setup remains more stable than Babai at lower precision.
+\end{document}
