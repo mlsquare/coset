@@ -1,31 +1,31 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://mlsquare.github.io/coset/test-summaries/TESTING_SUMMARY.html</loc>
-    <lastmod>2026-02-15T11:23:04.356Z</lastmod>
-  </url>
-  <url>
-    <loc>https://mlsquare.github.io/coset/test-summaries/INDEX.html</loc>
-    <lastmod>2026-02-15T11:23:04.355Z</lastmod>
-  </url>
-  <url>
     <loc>https://mlsquare.github.io/coset/paper.html</loc>
-    <lastmod>2026-02-15T11:23:04.353Z</lastmod>
+    <lastmod>2026-02-15T10:21:23.962Z</lastmod>
   </url>
   <url>
     <loc>https://mlsquare.github.io/coset/index.html</loc>
-    <lastmod>2026-02-15T11:23:04.353Z</lastmod>
-  </url>
-  <url>
-    <loc>https://mlsquare.github.io/coset/project.html</loc>
-    <lastmod>2026-02-15T11:23:04.353Z</lastmod>
-  </url>
-  <url>
-    <loc>https://mlsquare.github.io/coset/test-summaries/README.html</loc>
-    <lastmod>2026-02-15T11:23:04.356Z</lastmod>
+    <lastmod>2026-02-15T11:19:28.586Z</lastmod>
   </url>
   <url>
     <loc>https://mlsquare.github.io/coset/test-summaries/PYTEST_CONVERSION_SUMMARY.html</loc>
-    <lastmod>2026-02-15T11:23:04.356Z</lastmod>
+    <lastmod>2026-02-15T10:06:54.650Z</lastmod>
+  </url>
+  <url>
+    <loc>https://mlsquare.github.io/coset/test-summaries/README.html</loc>
+    <lastmod>2026-02-15T11:19:46.735Z</lastmod>
+  </url>
+  <url>
+    <loc>https://mlsquare.github.io/coset/test-summaries/INDEX.html</loc>
+    <lastmod>2026-02-15T10:06:54.649Z</lastmod>
+  </url>
+  <url>
+    <loc>https://mlsquare.github.io/coset/test-summaries/TESTING_SUMMARY.html</loc>
+    <lastmod>2026-02-15T11:19:47.185Z</lastmod>
+  </url>
+  <url>
+    <loc>https://mlsquare.github.io/coset/project.html</loc>
+    <lastmod>2026-02-15T11:19:34.246Z</lastmod>
   </url>
 </urlset>
