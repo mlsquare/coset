@@ -2,7 +2,7 @@
 Scalar Quantization Optimized Module
 
 This module provides optimized implementations for scalar quantization,
-including configuration, quantizers, and layers.
+including configuration, quantizers, layers, and CUDA acceleration.
 """
 
 # config.py was removed
@@ -17,6 +17,8 @@ from .codecs import (
     get_lsq_scalar_effective_bits,
     get_lsq_scalar_quantization_levels,
 )
+# cuda.py was removed
+
 __all__ = [
     # Configuration (removed)
     
@@ -33,4 +35,6 @@ __all__ = [
     'get_lsq_scalar_bounds',
     'get_lsq_scalar_effective_bits',
     'get_lsq_scalar_quantization_levels',
+    
+    # CUDA (removed)
 ]

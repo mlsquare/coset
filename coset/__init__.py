@@ -7,6 +7,7 @@ for quantization-aware training (QAT) and distributed training optimization.
 Key Features:
 - Multi-lattice support (Z², D₄, E₈)
 - Hierarchical encoding/decoding with M levels
+- CUDA acceleration
 - QAT integration
 - Distributed training optimization
 - Lookup table-based inner products

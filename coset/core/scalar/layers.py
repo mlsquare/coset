@@ -38,7 +38,7 @@ def create_lsq_scalar_linear(
         M: Hierarchical levels (effective bits = floor(M * log2(q)))
         tiling: Tiling strategy ('row' for per-row scaling, 'block' for per-tile scaling)
         block_size: Size of quantization blocks (defaults to 1 for scalar quantization)
-        device: Device to place the layer on (defaults to CPU)
+        device: Device to place the layer on (defaults to cuda if available, else CPU)
         **kwargs: Additional arguments passed to HNLQLinearQAT
         
     Returns:
@@ -54,8 +54,9 @@ def create_lsq_scalar_linear(
     # Import here to avoid circular imports
     from ..layers import HNLQLinearQAT
     
+    # Default to cuda if available and device not specified
     if device is None:
-        device = torch.device('cpu')
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     # Set default block_size for scalar quantization
     if block_size is None:

@@ -23,7 +23,12 @@ except ImportError as e:
     print("Make sure you have installed coset with: pip install -e .")
     exit(1)
 
-device = torch.device('cpu')
+# Check CUDA availability
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(f"Using device: {device}")
+if torch.cuda.is_available():
+    print(f"CUDA version: {torch.version.cuda}")
+    print(f"GPU: {torch.cuda.get_device_name(0)}")
 
 class QuantizedMLP(nn.Module):
     """Simple quantized MLP for MNIST classification using core APIs."""
@@ -55,11 +60,11 @@ class QuantizedMLP(nn.Module):
         
         # Create quantized layers using core APIs
         if lattice_type == "E8":
-            # Use E8-specific layer
+            # Use E8-specific layer - pass device explicitly for GPU acceleration
             self.fc1 = create_e8_hnlq_linear(
                 in_dim=input_size,
                 out_dim=hidden_size,
-                device=device,
+                device=device,  # Explicitly pass device for GPU placement
                 q=q,
                 M=M,
                 Delta0=1.5
@@ -67,7 +72,7 @@ class QuantizedMLP(nn.Module):
             self.fc2 = create_e8_hnlq_linear(
                 in_dim=hidden_size,
                 out_dim=hidden_size // 2,
-                device=device,
+                device=device,  # Explicitly pass device for GPU placement
                 q=q,
                 M=M,
                 Delta0=1.5

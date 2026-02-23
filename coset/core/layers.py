@@ -253,7 +253,7 @@ class HNLQLinearQAT(nn.Module):
             self.Delta0 = lattice.compute_delta0(q, M, rho)
         else:
             self.Delta0 = Delta0
-        
+        #print("Delta is", self.Delta0)
         # Store lattice matrices
         G, Ginv = lattice.get_generators()
         self.register_buffer('G', G)
@@ -314,6 +314,7 @@ class HNLQLinearQAT(nn.Module):
     def _initialize_weights(self):
         """Initialize weights using the specified method."""
         if self.init_method == 'normal':
+            #print(f"[DEBUG] Initializing weights with normal(mean={self.init_kwargs.get('mean', 0)}, std={self.init_kwargs.get('std', 1)})")
             nn.init.normal_(self.weight, **self.init_kwargs)
         elif self.init_method == 'xavier':
             nn.init.xavier_normal_(self.weight, **self.init_kwargs)
@@ -397,6 +398,7 @@ class HNLQLinearQAT(nn.Module):
     
     def _quantize_weights(self):
         """Quantize weights using hierarchical nested lattice quantization."""
+        #print("Qunatizing")
         W = self.weight  # [out_dim, in_dim]
         
         # Cold start: return original weights if quantization is disabled
@@ -414,7 +416,7 @@ class HNLQLinearQAT(nn.Module):
         
         # Compute adaptive beta bounds
         beta_min, beta_max = self._bounds()
-        
+        #print("beta_min", beta_min, "beta_max", beta_max)
         # Compute beta from learnable theta using sigmoid interpolation
         if self.tiling == 'row':
             theta = self.theta_beta[:self.out_features]
@@ -484,13 +486,18 @@ class HNLQLinearQAT(nn.Module):
         return x
     
     # Cold start control methods
+    # def update_epoch(self, epoch: int):
+    #     """Update current epoch and enable quantization if warmup is complete."""
+    #     self.current_epoch = epoch
+    #     if epoch >= self.warmup_epochs and not self.quantization_enabled:
+    #         self.quantization_enabled = True
+    #         print(f"Epoch {epoch}: Enabling quantization (warmup complete)")
     def update_epoch(self, epoch: int):
-        """Update current epoch and enable quantization if warmup is complete."""
         self.current_epoch = epoch
-        if epoch >= self.warmup_epochs and not self.quantization_enabled:
+        if (epoch + 1) >= self.warmup_epochs and not self.quantization_enabled:
             self.quantization_enabled = True
-            print(f"Epoch {epoch}: Enabling quantization (warmup complete)")
-    
+            print(f"Epoch {epoch+1}: Enabling quantization (warmup complete)")
+
     def enable_quantization(self):
         """Manually enable quantization."""
         self.quantization_enabled = True

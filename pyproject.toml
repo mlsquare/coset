@@ -46,6 +46,9 @@ dev = [
     "mypy>=1.0.0",
     "pre-commit>=2.20.0",
 ]
+cuda = [
+    "torch[cuda]>=2.0.0",
+]
 examples = [
     "scikit-learn>=1.0.0",
     "transformers>=4.20.0",
@@ -150,6 +153,7 @@ addopts = [
 ]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "cuda: marks tests that require CUDA",
     "integration: marks tests as integration tests",
 ]
 

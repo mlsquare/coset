@@ -13,7 +13,81 @@ from ..base import LatticeConfig, Lattice
 from .lattice import E8Lattice
 from enum import Enum
 
-
+#######################################################original##################################################
+# def e8_encode(
+#     x: torch.Tensor, 
+#     config: LatticeConfig,
+#     lattice: Optional[Lattice] = None,
+#     dither: Optional[torch.Tensor] = None,
+#     device: Optional[torch.device] = None,
+# ) -> Tuple[torch.Tensor, int]:
+#     """
+#     E8 hierarchical encoding.
+    
+#     Encode vectors using hierarchical nested lattice quantization with M levels
+#     and handle overload by scaling the vector until quantization succeeds.
+    
+#     Args:
+#         x: Input vector(s) to be encoded (shape [d] or [batch_size, d])
+#         config: LatticeConfig configuration
+#         lattice: Optional lattice instance (defaults to E8Lattice)
+#         dither: Optional dither vector for randomized quantization
+#         device: Device to perform computation on (defaults to x's device)
+        
+#     Returns:
+#         Tuple of (encoding_vectors, T) where:
+#         - encoding_vectors: Tensor of shape [batch_size, M, d] or [M, d] containing M encoding vectors
+#         - T: Number of scaling operations performed to handle overload
+#     """
+#     # Determine device
+#     if device is None:
+#         device = x.device
+    
+#     if lattice is None:
+#         lattice = E8Lattice(device=device)
+    
+#     # Handle both single vector and batch cases
+#     if x.dim() == 1:
+#         x = x.unsqueeze(0)  # Add batch dimension
+#         squeeze_output = True
+#     else:
+#         squeeze_output = False
+    
+#     # Ensure x is on the correct device
+#     x = x.to(device)
+#     batch_size, d = x.shape
+#     if d != 8:
+#         raise ValueError(f"Input dimension {d} doesn't match E8 dimension 8")
+        
+    
+#     # Apply scaling and dithering
+#     x_scaled = x / config.beta
+#     if config.with_dither and dither is not None:
+#         dither = dither.to(device)
+#         if dither.dim() == 1:
+#             dither = dither.unsqueeze(0)  # Add batch dimension
+#         x_scaled = x_scaled + dither
+    
+#     # Perform hierarchical encoding
+#     x_l = x_scaled.clone()
+#     encoding_vectors = []
+    
+#     for _ in range(config.M):
+#         # encode to E8 lattice (vectorized for batch)
+#         encoded = lattice.projection(x_l)  # [batch_size, 8] --> nearest E8 lattice point
+#         encoded = lattice.encode_coords(encoded, config.q)  # [batch_size, 8] ---> take that lattice point and express it in lattice coordinates--> radix-q digits
+#         encoding_vectors.append(encoded)
+#         # Scale down for next level
+#         x_l = x_l / config.q
+    
+#     encoding_vectors = torch.stack(encoding_vectors, dim=1)  # [batch_size, M, 8]
+#     #################pass through projection, and lastly it should be 0#######################################
+#     # Remove batch dimension if input was single vector
+#     if squeeze_output:
+#         encoding_vectors = encoding_vectors.squeeze(0)  # [M, 8]
+    
+#     return encoding_vectors, 0  # No scaling iterations needed
+###############################################################################################################################
 def e8_encode(
     x: torch.Tensor, 
     config: LatticeConfig,
@@ -74,16 +148,14 @@ def e8_encode(
     
     for _ in range(config.M):
         # encode to E8 lattice (vectorized for batch)
-        #lattice.projection_babai(x_l) if babai version is to be used.
-        x_l = lattice.projection(x_l)  # [batch_size, 8] --> nearest E8 lattice point
-        encoded = lattice.encode_coords(x_l, config.q)  # [batch_size, 8] ---> take that lattice point and express it in lattice coordinates--> radix-q digits
+        encoded = lattice.projection(x_l)  # [batch_size, 8] --> nearest E8 lattice point
+        encoded = lattice.encode_coords(encoded, config.q)  # [batch_size, 8] ---> take that lattice point and express it in lattice coordinates--> radix-q digits
         encoding_vectors.append(encoded)
         # Scale down for next level
         x_l = x_l / config.q
     
     encoding_vectors = torch.stack(encoding_vectors, dim=1)  # [batch_size, M, 8]
     #################pass through projection, and lastly it should be 0#######################################
-    #lattice.projection_babai(x_l) if babai version is to be used.
     residual_proj = lattice.projection(x_l)
     tol = 1e-8
     overload_flags = residual_proj.norm(dim=1) > tol
@@ -91,7 +163,6 @@ def e8_encode(
     if squeeze_output:
         encoding_vectors = encoding_vectors.squeeze(0)  # [M, 8]
         overload_flags = overload_flags.squeeze(0)
-    #print("New check3")
     return encoding_vectors, overload_flags, 0  # No scaling iterations needed
 
 class DecodingMethod(Enum):

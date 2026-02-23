@@ -2,7 +2,7 @@
 E8 Lattice Optimized Module
 
 This module provides optimized implementations specifically for E8 lattice quantization,
-including configuration, codecs, and layers.
+including configuration, codecs, layers, lookup tables, and CUDA acceleration.
 """
 
 from .lattice import E8Lattice

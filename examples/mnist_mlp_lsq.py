@@ -179,7 +179,7 @@ def test(model: nn.Module, test_loader: DataLoader, device: torch.device) -> flo
 
 def compare_models():
     """Compare standard and LSQ quantized models."""
-    device = torch.device('cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     
     # Load data

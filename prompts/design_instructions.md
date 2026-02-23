@@ -15,7 +15,7 @@ Below is the plan I want you to follow. Treat this as the source of truth while 
 **Non-negotiables:**
 - Vectorization across all leading dimensions; only the last dimension is lattice-dimension `d`.
 - Encoders/decoders must be **deterministic**, numerically stable, and **idempotent** in no-overload regimes.
-- Modular boundaries: lattice math, quantization, LUTs, PyTorch layers, and distributed hooks must remain decoupled.
+- Modular boundaries: lattice math, quantization, LUTs, CUDA kernels, PyTorch layers, and distributed hooks must remain decoupled.
 
 ---
 
@@ -34,6 +34,7 @@ Below is the plan I want you to follow. Treat this as the source of truth while 
 - **Lattice layer (math):** Nearest-neighbor quantizer Q_L, generator matrices, helpers for A_q mapping. Start with Z^d (baseline), then D4 (primary), E8 later.
 - **Quantization layer:** Vectorized, last-dim apply. Implements Algorithms 1 (encode) and 2 (decode), plus convenience quantize(). No training logic here.
 - **LUT subsystem:** Builders for two-sided and one-sided LUTs; indexing utilities from base-q labels; memory footprint controls.
+- **GPU acceleration:** CUDA kernels for encode, decode, LUT inner products, mod-q arithmetic. Fused and batched. Respect memory hierarchy (L1/L2/shared).
 - **QAT Linear:** Drop-in Linear replacement with FP32 shadow weights; periodic quantization of weights/activations; optional LUT-based matmul path; STE variants.
 - **Distributed hooks:** DDP comm hook for gradient compression; clear policy on when to decode (pre/post all-reduce) with a conservative path first.
 - **Test & bench suite:** Unit tests for math correctness; integration tests for QAT; benchmarks for throughput, cache effects, bandwidth savings.
@@ -61,11 +62,11 @@ Below is the plan I want you to follow. Treat this as the source of truth while 
 
 ### Phase A — Foundations (Correctness First)
 - Lattice math: Z^d, then D4. Validate Q_L properties (idempotence, nearest-point).
-- Vectorized encode/decode. Apply strictly on last dim; handle arbitrary leading dims.
+- Vectorized encode/decode on CPU/GPU (no CUDA yet). Apply strictly on last dim; handle arbitrary leading dims.
 - Overload detection and basic β control (no dithers initially).
 - Tests: exactness in no-overload cases; telescoping identity; random stress on shapes.
 
-**Exit criteria:** encode/decode stable, fast enough in pure PyTorch, and correct.
+**Exit criteria:** encode/decode stable, fast enough on GPU in pure PyTorch, and correct.
 
 ---
 
@@ -79,14 +80,14 @@ Below is the plan I want you to follow. Treat this as the source of truth while 
 
 ---
 
-### Phase C — Performance Optimization
-- Fuse M-loop, vectorize across batch.
-- Avoid repeated Q_L by staging decode aids.
-- Aggressive parallelization across tiles; unroll small M.
-- Mod-q arithmetic: elementwise ops and optional packed variants.
+### Phase C — CUDA Acceleration
+- Encode kernel: fuse M-loop, vectorize across batch; shared memory for small d; coalesce reads/writes; avoid warp divergence in tie-breaking.
+- Decode kernel: avoid repeated Q_L by staging tiny decode aids; still correct for D4.
+- LUT IP kernel: aggressive parallelization across tiles; unroll small M; consider texture cache for LUT.
+- Mod-q arithmetic kernel: elementwise ops and optional packed variants.
 - Tests: bit-for-bit (or ulp-level) agreement with reference; perf smoke on large batches.
 
-**Exit criteria:** Clear performance wins; no correctness regressions.
+**Exit criteria:** Clear GPU wins over pure Torch; no correctness regressions.
 
 ---
 
@@ -105,7 +106,7 @@ Below is the plan I want you to follow. Treat this as the source of truth while 
 - DDP comm hook: quantize gradient buckets along last dim, then conservative path = **decode before all-reduce**. All-reduce in compressed domain is future work.
 - Padding and tiling for buckets where last dim ≠ d; track and strip padding.
 - Instrumentation: bytes sent vs baseline; step time; convergence tracking.
-- Tests: correctness; convergence on a modest model.
+- Tests: single-node multi-GPU correctness; convergence on a modest model.
 
 **Exit criteria:** Demonstrated bandwidth reduction without harming convergence; clean logs and metrics.
 
@@ -159,7 +160,7 @@ If a test fails, fix the **lowest** layer responsible; do not patch at higher la
 
 ## 12) Acceptance Criteria (what “done” means)
 
-- Stable encode/decode with invariants passing.
+- Stable encode/decode with invariants passing on CPU and GPU.
 - LUT IP matches dequantized reference within tolerance; provides a performance win for chosen defaults.
 - QLinear trains a small model with sensible accuracy and stable loss.
 - DDP hook shows bandwidth reduction with maintained convergence.

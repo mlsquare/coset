@@ -40,7 +40,12 @@ except ImportError as e:
     print("Please install transformers: pip install transformers")
     sys.exit(1)
 
-device = torch.device('cpu')
+# Check CUDA availability
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(f"Using device: {device}")
+if torch.cuda.is_available():
+    print(f"CUDA version: {torch.version.cuda}")
+    print(f"GPU: {torch.cuda.get_device_name(0)}")
 
 class QuantizedBERTBinaryClassifierLSQ(nn.Module):
     """BERT binary classifier with LSQ scalar quantized classification head."""

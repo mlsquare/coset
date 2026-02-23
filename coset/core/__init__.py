@@ -2,8 +2,8 @@
 Optimized Lattice Modules
 
 This package provides lattice-specific optimized implementations for different
-lattice types (E8, D4, etc.) and scalar quantization with specialized codecs 
-and layers.
+lattice types (E8, D4, etc.) and scalar quantization with specialized codecs, 
+layers, and CUDA acceleration.
 """
 
 # E8 optimized module

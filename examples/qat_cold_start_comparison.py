@@ -30,7 +30,8 @@ except ImportError as e:
     print(f"✗ Failed to import coset core modules: {e}")
     exit(1)
 
-device = torch.device('cpu')
+# Check CUDA availability
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
 
 class BaselineMLP(nn.Module):

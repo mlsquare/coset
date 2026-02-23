@@ -28,7 +28,7 @@ class E8Lattice(Lattice):
             device: Device to place the generator matrix on
             config: Optional lattice configuration
         """
-        # Create G tensor on target device
+        # Create G tensor directly on target device to avoid CPU-GPU transfer
         G = torch.tensor([
             [2, 0, 0, 0, 0, 0, 0, 0],
             [-1, 1, 0, 0, 0, 0, 0, 0],
@@ -40,7 +40,9 @@ class E8Lattice(Lattice):
             [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5],
         ], dtype=torch.float32, device=device).T
         super().__init__(G, "E8", device=device, config=config)
-    
+        # Precompute for Babai:
+        self.G_inv = torch.linalg.inv(self.G)
+
     def _compute_packing_radius(self) -> float:
         """
         Compute the packing radius of the E8 lattice.
@@ -167,4 +169,18 @@ class E8Lattice(Lattice):
             result = result.squeeze(0)
         
         return result
-    
+
+    def projection_babai(self, u: torch.Tensor) -> torch.Tensor:
+        """
+        Babai approximation: Q̃(u) = G * round(G^{-1} u)
+        u: [B,8] or [8]
+        """
+        
+        squeeze = False
+        if u.dim() == 1:
+            u = u.unsqueeze(0)
+            squeeze = True
+        #Q(u) = G round(G^−1 u).
+        z = torch.round(u @ self.G_inv.T)   # [B,8]
+        y = z @ self.G.T                    # [B,8]
+        return y.squeeze(0) if squeeze else y
